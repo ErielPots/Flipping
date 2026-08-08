@@ -101,6 +101,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .text-button:hover { background: #d6e9ef; }
 .mini-button { background: #dce3df; border: 1px solid #9eada5; color: #304139; padding: 7px 10px; font-size: 12px; }
 .mini-button:hover { background: #cdd7d2; }
+.danger-button { border: 1px solid #c87676; border-radius: 9px; background: var(--red-soft); color: #a33e3e; padding: 8px 11px; font-size: 12px; font-weight: 800; }
+.danger-button:hover { border-color: var(--red); background: var(--red); color: white; }
+.danger-button.compact { padding: 7px 9px; font-size: 10px; }
 .icon-button { width: 38px; height: 38px; background: #d8dfdb; border: 1px solid #a6b3ac; color: var(--ink); font-size: 24px; }
 .full { width: 100%; }
 
@@ -293,7 +296,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investment-alert.error { border-color: #dda69e; background: var(--red-soft); color: #9d3939; }
 .investment-alert .text-button { margin-left: auto; }
 .investor-sheet-wrap { overflow-x: auto; border: 1px solid #a7b5ae; border-radius: 16px; background: #f8faf9; box-shadow: var(--shadow); }
-.investor-sheet { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 12px; }
+.investor-sheet { width: 100%; min-width: 1350px; border-collapse: collapse; font-size: 12px; }
 .investor-sheet th { padding: 11px 13px; border-right: 1px solid #bac6c0; border-bottom: 1px solid #aab8b1; background: #cfd8d3; color: #31423a; text-align: left; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; }
 .investor-sheet td { padding: 13px; border-right: 1px solid #d5ddd9; border-bottom: 1px solid #cbd4cf; color: #3d4c44; vertical-align: middle; }
 .investor-sheet th:last-child, .investor-sheet td:last-child { border-right: 0; }
@@ -303,9 +306,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .annual-rate-value { display: grid; gap: 3px; }
 .annual-rate-value small { color: var(--muted); font-size: 9px; font-weight: 600; }
 .rate-warning { display: inline-block; max-width: 95px; color: var(--red); font-size: 9px; line-height: 1.25; white-space: normal; }
-.investor-contribution-list { display: grid; gap: 5px; min-width: 190px; }
-.investor-contribution-list button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 8px; border: 1px solid #b5c3bc; border-radius: 8px; background: #f8faf9; color: var(--ink); text-align: left; }
-.investor-contribution-list button:hover { border-color: var(--blue); background: var(--blue-soft); }
+.investor-contribution-list { display: grid; gap: 5px; min-width: 310px; }
+.investor-contribution-list > small { color: var(--muted); }
+.investor-contribution-item { display: grid; grid-template-columns: minmax(130px,1fr) auto auto; align-items: center; gap: 6px; padding: 6px; border: 1px solid #b5c3bc; border-radius: 9px; background: #f8faf9; }
+.investor-contribution-item > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px; }
 .investor-contribution-list span { color: var(--muted); font-size: 10px; }
 .investor-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .annual-rate-help { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-top: 1px solid #b8c5be; background: #e4eae7; color: #526159; font-size: 11px; }

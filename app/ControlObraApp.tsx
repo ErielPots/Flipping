@@ -620,6 +620,21 @@ export function ControlObraApp() {
     </div>
   );
 
+  const deleteInvestor = (investor: Investor) => {
+    if (!window.confirm(`¿Eliminar a “${investor.name}” y todos sus aportes? Esta acción no se puede deshacer.`)) return;
+    setData((current) => ({ ...current, investors: current.investors.filter((item) => item.id !== investor.id) }));
+    notify("Inversor eliminado");
+  };
+
+  const deleteContribution = (investor: Investor, contribution: InvestorContribution) => {
+    if (!window.confirm(`¿Eliminar el aporte de ${money(contribution.amount, "USD")} del ${shortDate(contribution.date)}?`)) return;
+    setData((current) => ({
+      ...current,
+      investors: current.investors.map((item) => item.id === investor.id ? { ...item, contributions: item.contributions.filter((entry) => entry.id !== contribution.id) } : item),
+    }));
+    notify("Aporte eliminado");
+  };
+
   const renderInvestors = () => {
     const plan = data.investmentPlan;
     const investorCapital = investorCapitalTotal;
@@ -660,13 +675,13 @@ export function ControlObraApp() {
             const metrics = investorMetrics(investor, plan.projectedSaleDate);
             return <tr key={investor.id}>
               <td><b>{investor.name}</b></td>
-              <td><div className="investor-contribution-list">{investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <button type="button" key={contribution.id} title="Editar este aporte" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, "USD")}</b></button>)}</div></td>
+              <td><div className="investor-contribution-list">{investor.contributions.length === 0 ? <small>Sin aportes cargados</small> : investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <div className="investor-contribution-item" key={contribution.id}><div><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, "USD")}</b></div><button type="button" className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>Editar</button><button type="button" className="danger-button compact" onClick={() => deleteContribution(investor, contribution)}>Eliminar</button></div>)}</div></td>
               <td className="number-cell"><b>{money(metrics.capital, "USD")}</b></td>
               <td className="number-cell profit-cell">{money(investor.profitUsd, "USD")}</td>
               <td className="number-cell"><b>{money(metrics.capital + investor.profitUsd, "USD")}</b></td>
               <td className="number-cell">{percent(metrics.totalReturnPercent)}</td>
               <td className="number-cell annual-rate-cell">{metrics.annualRate === null ? <small className="rate-warning">{metrics.annualRateStatus}</small> : <div className="annual-rate-value"><b>{percent(metrics.annualRate)}</b><small>{Math.round(metrics.termDays ?? 0)} días</small></div>}</td>
-              <td><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button></div></td>
+              <td><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar</button></div></td>
             </tr>;
           })}</tbody>
         </table>
