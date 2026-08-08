@@ -287,6 +287,7 @@ export function ControlObraApp() {
   const [selectedBudgetId, setSelectedBudgetId] = useState<string>("");
   const [selectedInvestorId, setSelectedInvestorId] = useState<string>("");
   const [selectedContributionId, setSelectedContributionId] = useState<string>("");
+  const [expandedInvestorId, setExpandedInvestorId] = useState<string>("");
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<string>("all");
   const [rate, setRate] = useState(1500);
   const [rateDate, setRateDate] = useState(today());
@@ -334,12 +335,18 @@ export function ControlObraApp() {
     return () => window.clearTimeout(timer);
   }, [data, loaded]);
 
+  useEffect(() => {
+    setExpandedExpenseId("");
+    setExpandedInvestorId("");
+  }, [view]);
+
   const categories = data.categories.filter((item) => !item.archived);
   const subcategories = data.subcategories.filter((item) => !item.archived);
   const categoryName = (id: string) => data.categories.find((item) => item.id === id)?.name ?? "Sin categoría";
   const subcategoryName = (id: string) => id ? data.subcategories.find((item) => item.id === id)?.name ?? "Sin subcategoría" : "";
   const pathName = (categoryId: string, subcategoryId: string) =>
     [categoryName(categoryId), subcategoryName(subcategoryId)].filter(Boolean).join(" · ");
+  const expenseLabel = (expense: Expense) => expense.description.trim() || pathName(expense.categoryId, expense.subcategoryId);
   const subcategoriesFor = (categoryId: string) => {
     return linkedSubcategories(categoryId, data.categories, data.subcategories);
   };
@@ -471,14 +478,6 @@ export function ControlObraApp() {
         </article>
       </section>
 
-      <section className="quick-section">
-        <div className="section-title"><div><span className="eyebrow">Accesos rápidos</span><h2>¿Qué querés hacer?</h2></div></div>
-        <div className="quick-grid">
-          <button onClick={() => quickOpen("expense")}><span className="quick-icon blue">＋</span><b>Ingresar costo</b><small>Nuevo movimiento</small></button>
-          <button onClick={() => quickOpen("payment", "payments")}><span className="quick-icon green">$</span><b>Ingresar pago</b><small>Total o parcial</small></button>
-          <button onClick={() => quickOpen("budget", "budgets")}><span className="quick-icon amber">≡</span><b>Nuevo presupuesto</b><small>Comparar proveedores</small></button>
-        </div>
-      </section>
     </div>
   );
 
@@ -489,6 +488,18 @@ export function ControlObraApp() {
       .sort((a, b) => b.date.localeCompare(a.date));
     const remodelBudget = data.investmentPlan.remodelBudgetUsd;
     const remodelDifference = totals.committedUsd - remodelBudget;
+    const expenseDetails = (expense: Expense, remaining: number) => <InlinePaymentForm
+      expense={expense}
+      rate={rate}
+      remaining={remaining}
+      edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
+      close={() => setExpandedExpenseId("")}
+      save={(payment) => {
+        setData((current) => ({ ...current, payments: [...current.payments, payment] }));
+        setExpandedExpenseId("");
+        notify("Pago registrado");
+      }}
+    />;
 
     return <div className="page-content">
       <PageHeading eyebrow="Movimientos" title="Costos" copy="Tocá una fila para ver detalles y acciones." action="Ingresar costo" onAction={() => setModal("expense")} />
@@ -501,11 +512,11 @@ export function ControlObraApp() {
         <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
         {categories.map((category) => {
           const count = data.expenses.filter((expense) => expense.categoryId === category.id).length;
-          return <button key={category.id} className={expenseCategoryFilter === category.id ? "active" : ""} onClick={() => setExpenseCategoryFilter(category.id)}>{category.name} <span>{count}</span></button>;
+          return count > 0 ? <button key={category.id} className={expenseCategoryFilter === category.id ? "active" : ""} onClick={() => setExpenseCategoryFilter(category.id)}>{category.name} <span>{count}</span></button> : null;
         })}
       </div>
       {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay costos" copy="Ingresá el primer costo para comenzar." action="Ingresar costo" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay costos en esta categoría.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
-        <div className="expense-sheet-wrap">
+        <><div className="expense-sheet-wrap expense-desktop-view">
           <table className="expense-sheet">
             <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th className="number-cell">Monto</th><th className="number-cell">Saldo</th><th className="number-cell">Pagado</th></tr></thead>
             <tbody>{filteredExpenses.map((expense) => {
@@ -533,23 +544,24 @@ export function ControlObraApp() {
                 <td className="number-cell paid-cell">{money(paid, expense.currency)}</td>
               </tr>
               {expanded && <tr className="expense-payment-row"><td colSpan={6}>
-                <InlinePaymentForm
-                  expense={expense}
-                  rate={rate}
-                  remaining={remaining}
-                  edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
-                  close={() => setExpandedExpenseId("")}
-                  save={(payment) => {
-                    setData((current) => ({ ...current, payments: [...current.payments, payment] }));
-                    setExpandedExpenseId("");
-                    notify("Pago registrado");
-                  }}
-                />
+                {expenseDetails(expense, remaining)}
               </td></tr>}
               </Fragment>;
             })}</tbody>
           </table>
         </div>
+        <div className="expense-mobile-list">{filteredExpenses.map((expense) => {
+          const paid = paymentForExpense(expense);
+          const remaining = remainingForExpense(expense);
+          const expanded = expandedExpenseId === expense.id;
+          return <article className={`expense-mobile-card ${expanded ? "expanded" : ""}`} key={expense.id}>
+            <button type="button" className="expense-mobile-summary" aria-expanded={expanded} onClick={() => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id)}>
+              <div className="expense-mobile-title"><b>{categoryName(expense.categoryId)}{subcategoryName(expense.subcategoryId) ? ` · ${subcategoryName(expense.subcategoryId)}` : ""}</b><time>{shortDate(expense.date)}</time></div>
+              <div className="expense-mobile-numbers"><span>Monto <b>{money(expense.amount, expense.currency)}</b></span><span className="balance">Saldo <b>{money(remaining, expense.currency)}</b></span><span className="paid">Pagado <b>{money(paid, expense.currency)}</b></span></div>
+            </button>
+            {expanded && <div className="expense-mobile-details">{expenseDetails(expense, remaining)}</div>}
+          </article>;
+        })}</div></>
       )}
     </div>;
   };
@@ -566,7 +578,7 @@ export function ControlObraApp() {
             const percent = expense.amount ? Math.min(100, paid / expense.amount * 100) : 0;
             return <article className="payment-card" key={expense.id}>
               <div className="payment-card-top">
-                <div><span className="soft-label">{pathName(expense.categoryId, expense.subcategoryId)}</span><h3>{expense.description}</h3></div>
+                <div><span className="soft-label">{pathName(expense.categoryId, expense.subcategoryId)}</span><h3>{expenseLabel(expense)}</h3></div>
                 <span className="pending-pill">Pendiente</span>
               </div>
               <div className="payment-numbers"><span>Total <b>{money(expense.amount, expense.currency)}</b></span><span>Pagado <b>{money(paid, expense.currency)}</b></span><span>Resta <b>{money(remaining, expense.currency)}</b></span></div>
@@ -579,7 +591,7 @@ export function ControlObraApp() {
       {data.payments.length > 0 && <section className="history-section"><div className="section-title"><div><span className="eyebrow">Historial</span><h2>Últimos pagos</h2></div></div>
         <div className="list-panel compact">{data.payments.slice().reverse().slice(0, 8).map((payment) => {
           const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <div className="history-row" key={payment.id}><span className="history-check">✓</span><div><b>{expense?.description ?? "Costo"}</b><small>{payment.description || "Pago registrado"} · {shortDate(payment.date)}</small></div><strong>{money(payment.amount, payment.currency)}</strong></div>;
+          return <div className="history-row" key={payment.id}><span className="history-check">✓</span><div><b>{expense ? expenseLabel(expense) : "Costo"}</b><small>{payment.description || "Pago registrado"} · {shortDate(payment.date)}</small></div><strong>{money(payment.amount, payment.currency)}</strong></div>;
         })}</div>
       </section>}
     </div>;
@@ -674,7 +686,7 @@ export function ControlObraApp() {
       </section>
       {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según el valor de la propiedad menos el capital de inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
 
-      {data.investors.length === 0 ? <EmptyState icon="↗" title="Todavía no hay inversores" copy="Ingresá el nombre, el primer aporte recibido y la ganancia que le vas a pagar." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} /> : <div className="investor-sheet-wrap">
+      {data.investors.length === 0 ? <EmptyState icon="↗" title="Todavía no hay inversores" copy="Ingresá el nombre, el primer aporte recibido y la ganancia que le vas a pagar." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} /> : <><div className="investor-sheet-wrap investor-desktop-view">
         <table className="investor-sheet">
           <thead><tr><th>Inversor</th><th>Aportes recibidos</th><th className="number-cell">Capital en USD</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver en USD</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual simple</th><th>Acciones</th></tr></thead>
           <tbody>{data.investors.map((investor) => {
@@ -692,7 +704,23 @@ export function ControlObraApp() {
           })}</tbody>
         </table>
         <div className="annual-rate-help"><b>Tasa anual simple, no efectiva</b><span>Ganancia % × 365 ÷ días hasta la venta. No supone reinversión ni interés compuesto. Si hay varios aportes, usa una fecha promedio ponderada por cada monto convertido a USD.</span></div>
-      </div>}
+      </div>
+      <div className="investor-mobile-list">{data.investors.map((investor) => {
+        const metrics = investorMetrics(investor, plan.projectedSaleDate);
+        const expanded = expandedInvestorId === investor.id;
+        return <article className={`investor-mobile-card ${expanded ? "expanded" : ""}`} key={investor.id}>
+          <button type="button" className="investor-mobile-summary" aria-expanded={expanded} onClick={() => setExpandedInvestorId((current) => current === investor.id ? "" : investor.id)}>
+            <div><b>{investor.name}</b><small>{investor.contributions.length} {investor.contributions.length === 1 ? "aporte" : "aportes"}</small></div>
+            <span>Capital <b>{money(metrics.capital, "USD")}</b></span>
+            <span>Tasa anual <b>{metrics.annualRate === null ? metrics.annualRateStatus : percent(metrics.annualRate)}</b></span>
+          </button>
+          {expanded && <div className="investor-mobile-details">
+            <div className="investor-mobile-stats"><span>Ganancia <b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b></span><span>A devolver <b>{money(metrics.capital + investor.profitUsd, "USD")}</b></span><span>Ganancia % <b>{percent(metrics.totalReturnPercent)}</b></span><span>Plazo <b>{metrics.termDays ? `${Math.round(metrics.termDays)} días` : "—"}</b></span></div>
+            <div className="investor-mobile-contributions"><span>Aportes recibidos</span>{investor.contributions.length === 0 ? <small>Sin aportes</small> : investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <button type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</div>
+            <div className="investor-mobile-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar</button></div>
+          </div>}
+        </article>;
+      })}<div className="mobile-rate-note">Tasa anual simple: no incluye reinversión.</div></div></>}
     </div>;
   };
 
@@ -769,7 +797,6 @@ export function ControlObraApp() {
       </section>
 
       <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>
-      <button className="mobile-fab" aria-label="Ingresar costo" onClick={() => setModal("expense")}>＋</button>
 
       {modal === "expense" && <ExpenseModal data={data} rate={rate} expense={data.expenses.find((item) => item.id === selectedExpenseId)} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(expense) => {
         setData((current) => ({ ...current, expenses: current.expenses.some((item) => item.id === expense.id) ? current.expenses.map((item) => item.id === expense.id ? expense : item) : [...current.expenses, expense] }));

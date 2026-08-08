@@ -142,19 +142,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .comparison-total { border: 0; padding-bottom: 0; }
 .comparison-total strong { font-size: 20px; }
 
-.quick-section { margin-top: 30px; }
-.quick-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; margin-top: 15px; }
-.quick-grid button { position: relative; border: 1px solid #aab8b1; border-bottom-width: 3px; border-radius: 14px; background: #eef2f0; padding: 18px; text-align: left; display: grid; gap: 5px; transition: .18s ease; }
-.quick-grid button::after { content: "›"; position: absolute; right: 16px; top: 14px; color: #68776f; font-size: 22px; font-weight: 900; }
-.quick-grid button:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: #7d9187; background: #f8faf9; }
-.quick-grid b { margin-top: 6px; }
-.quick-grid small { color: var(--muted); }
-.quick-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; font-size: 20px; font-weight: 900; }
-.quick-icon.blue { color: var(--blue); background: var(--blue-soft); }
-.quick-icon.green { color: var(--green); background: var(--green-soft); }
-.quick-icon.violet { color: var(--violet); background: var(--violet-soft); }
-.quick-icon.amber { color: var(--amber); background: var(--amber-soft); }
-
 .empty-state { min-height: 370px; background: #f5f7f6; border: 2px dashed #aab7b0; border-radius: 20px; display: grid; place-items: center; align-content: center; text-align: center; padding: 30px; }
 .empty-state > span { width: 60px; height: 60px; border-radius: 18px; display: grid; place-items: center; background: var(--blue-soft); color: var(--blue); font-size: 28px; font-weight: 900; }
 .empty-state h2 { margin: 17px 0 6px; }
@@ -197,6 +184,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .expense-sheet .date-cell { color: var(--muted); }
 .expense-sheet .paid-cell { color: var(--green); }
 .expense-sheet .balance-cell { color: var(--amber); font-weight: 700; }
+.expense-mobile-list, .investor-mobile-list { display: none; }
 .cost-budget-comparison { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 14px 26px; margin-bottom: 16px; padding: 14px 17px; border: 1px solid #98c5af; border-left: 5px solid var(--green); border-radius: 13px; background: var(--green-soft); }
 .cost-budget-comparison.over { border-color: #dda69e; border-left-color: var(--red); background: var(--red-soft); }
 .cost-budget-comparison.unset { display: flex; justify-content: space-between; border-color: #aebbb4; border-left-color: #7d9187; background: #eef2f0; }
@@ -315,6 +303,23 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investor-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .annual-rate-help { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-top: 1px solid #b8c5be; background: #e4eae7; color: #526159; font-size: 11px; }
 .annual-rate-help b { color: var(--ink); }
+.investor-mobile-list { gap: 10px; }
+.investor-mobile-card { overflow: hidden; border: 1px solid #aebbb4; border-radius: 14px; background: #f8faf9; box-shadow: 0 6px 16px rgba(30,54,44,.08); }
+.investor-mobile-card.expanded { border-color: #7f998c; }
+.investor-mobile-summary { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 11px; padding: 14px; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.investor-mobile-summary > div { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.investor-mobile-summary > div b { font-size: 16px; }
+.investor-mobile-summary small { color: var(--muted); }
+.investor-mobile-summary > span, .investor-mobile-stats span { display: grid; gap: 4px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
+.investor-mobile-summary > span b, .investor-mobile-stats span b { color: var(--ink); font-size: 12px; text-transform: none; letter-spacing: 0; }
+.investor-mobile-details { display: grid; gap: 13px; padding: 14px; border-top: 1px solid #bdc9c3; background: #e9eeeb; }
+.investor-mobile-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.investor-mobile-contributions { display: grid; gap: 6px; }
+.investor-mobile-contributions > span { color: #526159; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
+.investor-mobile-contributions button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid #adbbb4; border-radius: 9px; background: #f8faf9; color: var(--ink); }
+.investor-mobile-contributions button span { color: var(--muted); font-size: 10px; }
+.investor-mobile-actions { display: flex; gap: 7px; }
+.mobile-rate-note { padding: 8px 4px; color: var(--muted); font-size: 10px; text-align: center; }
 
 .manage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .manage-card { background: #f8faf9; border: 1px solid #aebbb4; border-radius: 18px; overflow: hidden; box-shadow: var(--shadow); }
@@ -399,11 +404,10 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .loading-mark { width: 68px; height: 68px; border-radius: 20px; background: #e7b966; color: #173c43; display: grid; place-items: center; font-size: 24px; font-weight: 900; animation: pulse 1.3s infinite; }
 .app-loading h1 { margin: 18px 0 5px; }
 .app-loading p { margin: 0; color: #b9ccca; }
-.bottom-nav, .mobile-fab { display: none; }
+.bottom-nav { display: none; }
 
 @media (max-width: 1120px) {
   .summary-grid { grid-template-columns: repeat(2,1fr); }
-  .quick-grid { grid-template-columns: repeat(2,1fr); }
   .investment-plan-grid, .funding-summary-grid { grid-template-columns: repeat(2,1fr); }
   .payment-list, .progress-grid, .offers-grid { grid-template-columns: repeat(2,1fr); }
   .expense-row { grid-template-columns: 8px 1fr 130px 120px auto; }
@@ -426,12 +430,25 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .welcome-row p, .page-heading p { font-size: 14px; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .manage-grid { grid-template-columns: 1fr; }
+  .expense-desktop-view, .investor-desktop-view { display: none; }
+  .expense-mobile-list, .investor-mobile-list { display: grid; }
+  .expense-mobile-list { gap: 10px; }
+  .expense-mobile-card { overflow: hidden; border: 1px solid #aebbb4; border-radius: 14px; background: #f8faf9; box-shadow: 0 6px 16px rgba(30,54,44,.08); }
+  .expense-mobile-card.expanded { border-color: #7f998c; }
+  .expense-mobile-summary { width: 100%; display: grid; gap: 12px; padding: 14px; border: 0; background: transparent; color: var(--ink); text-align: left; }
+  .expense-mobile-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .expense-mobile-title time { color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .expense-mobile-numbers { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
+  .expense-mobile-numbers span { display: grid; gap: 4px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
+  .expense-mobile-numbers b { color: var(--ink); font-size: 12px; text-transform: none; letter-spacing: 0; }
+  .expense-mobile-numbers .balance b { color: var(--amber); }
+  .expense-mobile-numbers .paid b { color: var(--green); }
+  .expense-mobile-details { border-top: 1px solid #bdc9c3; background: #dfe7e3; }
   .bottom-nav { position: fixed; inset: auto 0 0; z-index: 30; height: 68px; padding: 6px 5px max(6px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5,1fr); background: rgba(223,229,225,.97); border-top: 1px solid #9faca5; backdrop-filter: blur(12px); }
   .bottom-nav button { border: 0; background: transparent; color: #7a8981; display: grid; place-items: center; align-content: center; gap: 2px; }
   .bottom-nav button.active { color: var(--blue); font-weight: 800; }
   .bottom-nav button span { font-size: 18px; font-weight: 900; }
   .bottom-nav button small { font-size: 9px; }
-  .mobile-fab { display: grid; place-items: center; position: fixed; z-index: 35; right: 16px; bottom: 82px; width: 53px; height: 53px; border: 0; border-radius: 17px; background: var(--blue); color: white; font-size: 28px; box-shadow: 0 12px 30px rgba(23,107,135,.35); }
   .toast { bottom: 84px; left: 16px; right: 16px; text-align: center; }
 }
 
@@ -444,8 +461,6 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .summary-icon { margin-bottom: 13px; }
   .dashboard-grid { gap: 12px; }
   .panel { padding: 17px; }
-  .quick-grid { gap: 10px; }
-  .quick-grid button { padding: 14px; }
   .payment-list, .progress-grid, .offers-grid { grid-template-columns: 1fr; }
   .expense-row { grid-template-columns: 7px 1fr auto; gap: 10px; }
   .expense-amount { grid-column: 2; text-align: left; }
@@ -472,12 +487,16 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .investment-plan-panel { padding: 16px; }
   .investment-plan-head { align-items: flex-start; display: grid; }
   .investment-plan-head .secondary-button { width: 100%; }
-  .investment-plan-grid, .funding-summary-grid { grid-template-columns: 1fr; }
+  .investment-plan-grid, .funding-summary-grid { grid-template-columns: repeat(2,1fr); }
+  .investment-plan-grid article { min-height: auto; padding: 12px; }
+  .investment-plan-grid article.sale, .funding-summary-grid article:last-child { grid-column: 1 / -1; }
   .annual-rate-help { align-items: flex-start; display: grid; }
   .cost-budget-comparison, .cost-budget-comparison.unset { display: grid; grid-template-columns: 1fr; gap: 10px; }
   .investment-alert { align-items: flex-start; display: grid; }
   .investment-alert .text-button { margin-left: 0; justify-self: start; }
   .expense-detail-head { align-items: flex-start; }
   .expense-detail-grid { grid-template-columns: 1fr; }
+  .inline-payment-form { grid-template-columns: 1fr; }
+  .inline-payment-note { grid-column: 1; }
   .bottom-nav button small { font-size: 8px; }
 }
