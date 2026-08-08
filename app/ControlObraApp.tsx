@@ -46,11 +46,14 @@ type BudgetGroup = {
   offers: BudgetOffer[];
   approvedOfferId?: string;
 };
-type InvestorContribution = { id: string; date: string; amount: number };
+type InvestorContribution = { id: string; date: string; amount: number; currency?: Currency; rate?: number };
 type Investor = {
   id: string;
   name: string;
   profitUsd: number;
+  profitAmount?: number;
+  profitCurrency?: Currency;
+  profitRate?: number;
   contributions: InvestorContribution[];
 };
 type InvestmentPlan = {
@@ -120,7 +123,13 @@ function normalizeState(candidate: AppState | undefined): AppState {
   if (!candidate?.categories || !candidate?.subcategories) return initialState;
   const savedPlan = candidate.investmentPlan;
   const investmentState = {
-    investors: Array.isArray(candidate.investors) ? candidate.investors : [],
+    investors: Array.isArray(candidate.investors) ? candidate.investors.map((investor) => ({
+      ...investor,
+      profitAmount: investor.profitAmount ?? investor.profitUsd,
+      profitCurrency: investor.profitCurrency ?? "USD",
+      profitRate: investor.profitRate ?? 1500,
+      contributions: (investor.contributions ?? []).map((contribution) => ({ ...contribution, currency: contribution.currency ?? "USD", rate: contribution.rate ?? 1500 })),
+    })) : [],
     investmentPlan: {
       ...emptyInvestmentPlan,
       ...(savedPlan ?? {}),
@@ -193,12 +202,13 @@ const toArs = (amount: number, currency: Currency, rate: number) =>
 const toUsd = (amount: number, currency: Currency, rate: number) =>
   currency === "USD" ? amount : amount / rate;
 const percent = (value: number) => `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value)}%`;
+const contributionInUsd = (contribution: InvestorContribution) => toUsd(contribution.amount, contribution.currency ?? "USD", contribution.rate ?? 1500);
 const investorMetrics = (investor: Investor, projectedSaleDate: string) => {
-  const capital = investor.contributions.reduce((sum, item) => sum + item.amount, 0);
+  const capital = investor.contributions.reduce((sum, item) => sum + contributionInUsd(item), 0);
   const totalReturnPercent = capital ? (investor.profitUsd / capital) * 100 : 0;
   if (!capital) return { capital, totalReturnPercent, annualRate: null as number | null, termDays: null as number | null, annualRateStatus: "Sin capital" };
   if (!projectedSaleDate) return { capital, totalReturnPercent, annualRate: null as number | null, termDays: null as number | null, annualRateStatus: "Falta fecha de venta" };
-  const weightedContributionTime = investor.contributions.reduce((sum, item) => sum + new Date(`${item.date}T12:00:00`).getTime() * item.amount, 0) / capital;
+  const weightedContributionTime = investor.contributions.reduce((sum, item) => sum + new Date(`${item.date}T12:00:00`).getTime() * contributionInUsd(item), 0) / capital;
   const saleTime = new Date(`${projectedSaleDate}T12:00:00`).getTime();
   const days = (saleTime - weightedContributionTime) / 86_400_000;
   if (!Number.isFinite(days) || days <= 0) return { capital, totalReturnPercent, annualRate: null as number | null, termDays: null as number | null, annualRateStatus: "Revisar fechas" };
@@ -363,7 +373,9 @@ export function ControlObraApp() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
-  const investorCapitalTotal = data.investors.reduce((sum, investor) => sum + investor.contributions.reduce((contributionSum, contribution) => contributionSum + contribution.amount, 0), 0);
+  const investorCapitalTotal = data.investors.reduce((sum, investor) => sum + investor.contributions.reduce((contributionSum, contribution) => contributionSum + contributionInUsd(contribution), 0), 0);
+  const selectedInvestor = data.investors.find((item) => item.id === selectedInvestorId);
+  const selectedContribution = selectedInvestor?.contributions.find((item) => item.id === selectedContributionId);
 
   const notify = (message: string) => {
     setToast(message);
@@ -627,12 +639,13 @@ export function ControlObraApp() {
   };
 
   const deleteContribution = (investor: Investor, contribution: InvestorContribution) => {
-    if (!window.confirm(`¿Eliminar el aporte de ${money(contribution.amount, "USD")} del ${shortDate(contribution.date)}?`)) return;
+    if (!window.confirm(`¿Eliminar el aporte de ${money(contribution.amount, contribution.currency ?? "USD")} del ${shortDate(contribution.date)}?`)) return false;
     setData((current) => ({
       ...current,
       investors: current.investors.map((item) => item.id === investor.id ? { ...item, contributions: item.contributions.filter((entry) => entry.id !== contribution.id) } : item),
     }));
     notify("Aporte eliminado");
+    return true;
   };
 
   const renderInvestors = () => {
@@ -670,14 +683,14 @@ export function ControlObraApp() {
 
       {data.investors.length === 0 ? <EmptyState icon="↗" title="Todavía no hay inversores" copy="Ingresá el nombre, el primer aporte recibido y la ganancia que le vas a pagar." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} /> : <div className="investor-sheet-wrap">
         <table className="investor-sheet">
-          <thead><tr><th>Inversor</th><th>Aportes recibidos</th><th className="number-cell">Capital</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual</th><th>Acciones</th></tr></thead>
+          <thead><tr><th>Inversor</th><th>Aportes recibidos</th><th className="number-cell">Capital en USD</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver en USD</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual simple</th><th>Acciones</th></tr></thead>
           <tbody>{data.investors.map((investor) => {
             const metrics = investorMetrics(investor, plan.projectedSaleDate);
             return <tr key={investor.id}>
               <td><b>{investor.name}</b></td>
-              <td><div className="investor-contribution-list">{investor.contributions.length === 0 ? <small>Sin aportes cargados</small> : investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <div className="investor-contribution-item" key={contribution.id}><div><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, "USD")}</b></div><button type="button" className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>Editar</button><button type="button" className="danger-button compact" onClick={() => deleteContribution(investor, contribution)}>Eliminar</button></div>)}</div></td>
+              <td><div className="investor-contribution-list">{investor.contributions.length === 0 ? <small>Sin aportes cargados</small> : investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <button className="investor-contribution-item" type="button" key={contribution.id} title="Tocar para editar este aporte" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</div></td>
               <td className="number-cell"><b>{money(metrics.capital, "USD")}</b></td>
-              <td className="number-cell profit-cell">{money(investor.profitUsd, "USD")}</td>
+              <td className="number-cell profit-cell"><b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b>{(investor.profitCurrency ?? "USD") === "ARS" && <small>{money(investor.profitUsd, "USD")}</small>}</td>
               <td className="number-cell"><b>{money(metrics.capital + investor.profitUsd, "USD")}</b></td>
               <td className="number-cell">{percent(metrics.totalReturnPercent)}</td>
               <td className="number-cell annual-rate-cell">{metrics.annualRate === null ? <small className="rate-warning">{metrics.annualRateStatus}</small> : <div className="annual-rate-value"><b>{percent(metrics.annualRate)}</b><small>{Math.round(metrics.termDays ?? 0)} días</small></div>}</td>
@@ -685,7 +698,7 @@ export function ControlObraApp() {
             </tr>;
           })}</tbody>
         </table>
-        <div className="annual-rate-help"><b>¿Cómo se calcula la tasa anual?</b><span>Ganancia % × 365 ÷ días hasta la venta. Si hay varios aportes, usa una fecha promedio ponderada por cada monto.</span></div>
+        <div className="annual-rate-help"><b>Tasa anual simple, no efectiva</b><span>Ganancia % × 365 ÷ días hasta la venta. No supone reinversión ni interés compuesto. Si hay varios aportes, usa una fecha promedio ponderada por cada monto convertido a USD.</span></div>
       </div>}
     </div>;
   };
@@ -774,11 +787,11 @@ export function ControlObraApp() {
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} close={() => setModal(null)} save={(nextRate, nextDate) => { setRate(nextRate); setRateDate(nextDate); setRateSource("Cotización ajustada manualmente"); setModal(null); notify("Cotización actualizada"); }} />}
       {modal === "investmentPlan" && <InvestmentPlanModal plan={data.investmentPlan} investorCapitalUsd={investorCapitalTotal} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
-      {modal === "investor" && <InvestorModal investor={data.investors.find((item) => item.id === selectedInvestorId)} close={() => { setModal(null); setSelectedInvestorId(""); }} save={(investor) => {
+      {modal === "investor" && <InvestorModal rate={rate} investor={selectedInvestor} close={() => { setModal(null); setSelectedInvestorId(""); }} save={(investor) => {
         setData((current) => ({ ...current, investors: current.investors.some((item) => item.id === investor.id) ? current.investors.map((item) => item.id === investor.id ? investor : item) : [...current.investors, investor] }));
         setModal(null); setSelectedInvestorId(""); notify("Inversor guardado");
       }} />}
-      {modal === "contribution" && <ContributionModal investor={data.investors.find((item) => item.id === selectedInvestorId)} contribution={data.investors.find((item) => item.id === selectedInvestorId)?.contributions.find((item) => item.id === selectedContributionId)} close={() => { setModal(null); setSelectedInvestorId(""); setSelectedContributionId(""); }} save={(contribution) => {
+      {modal === "contribution" && <ContributionModal rate={rate} investor={selectedInvestor} contribution={selectedContribution} remove={selectedInvestor && selectedContribution ? () => { if (deleteContribution(selectedInvestor, selectedContribution)) { setModal(null); setSelectedInvestorId(""); setSelectedContributionId(""); } } : undefined} close={() => { setModal(null); setSelectedInvestorId(""); setSelectedContributionId(""); }} save={(contribution) => {
         setData((current) => ({ ...current, investors: current.investors.map((investor) => investor.id === selectedInvestorId ? { ...investor, contributions: investor.contributions.some((item) => item.id === contribution.id) ? investor.contributions.map((item) => item.id === contribution.id ? contribution : item) : [...investor.contributions, contribution] } : investor) }));
         setModal(null); setSelectedInvestorId(""); setSelectedContributionId(""); notify("Aporte guardado");
       }} />}
@@ -956,43 +969,54 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
   </form></Modal>;
 }
 
-function InvestorModal({ investor, close, save }: { investor?: Investor; close: () => void; save: (investor: Investor) => void }) {
+function InvestorModal({ investor, rate, close, save }: { investor?: Investor; rate: number; close: () => void; save: (investor: Investor) => void }) {
+  const savedProfit = investor?.profitAmount ?? investor?.profitUsd ?? 0;
   const [name, setName] = useState(investor?.name ?? "");
-  const [profit, setProfit] = useState(investor?.profitUsd ? investor.profitUsd.toString() : "");
+  const [profit, setProfit] = useState(savedProfit ? savedProfit.toString() : "");
+  const [profitCurrency, setProfitCurrency] = useState<Currency>(investor?.profitCurrency ?? "USD");
   const [firstDate, setFirstDate] = useState(today());
   const [firstAmount, setFirstAmount] = useState("");
+  const [firstCurrency, setFirstCurrency] = useState<Currency>("USD");
+  const profitConversionRate = investor?.profitCurrency === profitCurrency ? investor.profitRate ?? rate : rate;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim() || Number(profit) < 0 || (!investor && Number(firstAmount) <= 0)) return;
+    const profitRate = profitConversionRate;
     save({
       id: investor?.id ?? uid("investor"),
       name: name.trim(),
-      profitUsd: Number(profit) || 0,
-      contributions: investor?.contributions ?? [{ id: uid("contribution"), date: firstDate, amount: Number(firstAmount) }],
+      profitUsd: toUsd(Number(profit) || 0, profitCurrency, profitRate),
+      profitAmount: Number(profit) || 0,
+      profitCurrency,
+      profitRate,
+      contributions: investor?.contributions ?? [{ id: uid("contribution"), date: firstDate, amount: Number(firstAmount), currency: firstCurrency, rate }],
     });
   };
   return <Modal title={investor ? "Editar inversor" : "Nuevo inversor"} close={close}><form className="form-grid" onSubmit={submit}>
     <label className="span-2"><span>Nombre del inversor</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Nombre y apellido" /></label>
-    {!investor && <><label><span>Fecha del primer aporte</span><input required type="date" value={firstDate} onChange={(event) => setFirstDate(event.target.value)} /></label><label><span>Primer aporte (USD)</span><FormattedAmountInput required value={firstAmount} setValue={setFirstAmount} placeholder="USD" /></label></>}
-    <label className="span-2"><span>Ganancia acordada para el inversor (USD)</span><FormattedAmountInput required value={profit} setValue={setProfit} placeholder="USD" /></label>
+    {!investor && <><label className="span-2"><span>Fecha del primer aporte</span><input required type="date" value={firstDate} onChange={(event) => setFirstDate(event.target.value)} /></label><div className="amount-field span-2"><span>Primer aporte</span><div className="amount-control"><CurrencyFields currency={firstCurrency} setCurrency={setFirstCurrency} /><label className="amount-input"><span>{firstCurrency === "USD" ? "US$" : "$"}</span><FormattedAmountInput required value={firstAmount} setValue={setFirstAmount} placeholder={firstCurrency} /></label></div></div></>}
+    <div className="amount-field span-2"><span>Ganancia acordada para el inversor</span><div className="amount-control"><CurrencyFields currency={profitCurrency} setCurrency={setProfitCurrency} /><label className="amount-input"><span>{profitCurrency === "USD" ? "US$" : "$"}</span><FormattedAmountInput required value={profit} setValue={setProfit} placeholder={profitCurrency} /></label></div></div>
+    {profitCurrency === "ARS" && profit && <div className="conversion-note span-2">Equivale a <b>{money(Number(profit) / profitConversionRate, "USD")}</b> para los cálculos de inversión.</div>}
     <div className="conversion-note span-2">La devolución total será el <b>capital recibido más esta ganancia</b>.</div>
     {investor && <div className="source-note span-2"><span>Aportes</span><b>Las fechas y los montos se editan directamente desde la grilla de inversores.</b></div>}
     <FormActions close={close} label={investor ? "Guardar cambios" : "Guardar inversor"} />
   </form></Modal>;
 }
 
-function ContributionModal({ investor, contribution, close, save }: { investor?: Investor; contribution?: InvestorContribution; close: () => void; save: (contribution: InvestorContribution) => void }) {
+function ContributionModal({ investor, contribution, rate, remove, close, save }: { investor?: Investor; contribution?: InvestorContribution; rate: number; remove?: () => void; close: () => void; save: (contribution: InvestorContribution) => void }) {
   const [date, setDate] = useState(contribution?.date ?? today());
   const [amount, setAmount] = useState(contribution?.amount ? contribution.amount.toString() : "");
+  const [currency, setCurrency] = useState<Currency>(contribution?.currency ?? "USD");
   if (!investor) return null;
   return <Modal title={`${contribution ? "Editar" : "Agregar"} aporte · ${investor.name}`} close={close}><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
     if (Number(amount) <= 0) return;
-    save({ id: contribution?.id ?? uid("contribution"), date, amount: Number(amount) });
+    save({ id: contribution?.id ?? uid("contribution"), date, amount: Number(amount), currency, rate: contribution?.currency === currency ? contribution.rate ?? rate : rate });
   }}>
-    <label><span>Fecha en que entregó el dinero</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-    <label><span>Monto recibido (USD)</span><FormattedAmountInput required value={amount} setValue={setAmount} placeholder="USD" /></label>
-    <FormActions close={close} label="Guardar aporte" />
+    <label className="span-2"><span>Fecha en que entregó el dinero</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+    <div className="amount-field span-2"><span>Monto recibido</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput required value={amount} setValue={setAmount} placeholder={currency} /></label></div></div>
+    {currency === "ARS" && amount && <div className="conversion-note span-2">Equivale a <b>{money(Number(amount) / (contribution?.currency === currency ? contribution.rate ?? rate : rate), "USD")}</b> para los cálculos de inversión.</div>}
+    <FormActions close={close} label="Guardar aporte" deleteLabel={contribution ? "Eliminar aporte" : undefined} onDelete={remove} />
   </form></Modal>;
 }
 
@@ -1006,6 +1030,6 @@ function RateModal({ rate, date, source, close, save }: { rate: number; date: st
   </form></Modal>;
 }
 
-function FormActions({ close, label }: { close: () => void; label: string }) {
-  return <div className="form-actions span-2"><button type="button" className="secondary-button" onClick={close}>Cancelar</button><button type="submit" className="primary-button">{label}</button></div>;
+function FormActions({ close, label, deleteLabel, onDelete }: { close: () => void; label: string; deleteLabel?: string; onDelete?: () => void }) {
+  return <div className="form-actions span-2">{deleteLabel && onDelete && <button type="button" className="danger-button" onClick={onDelete}>{deleteLabel}</button>}<button type="button" className="secondary-button" onClick={close}>Cancelar</button><button type="submit" className="primary-button">{label}</button></div>;
 }
