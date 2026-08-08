@@ -346,7 +346,6 @@ export function ControlObraApp() {
   const subcategoryName = (id: string) => id ? data.subcategories.find((item) => item.id === id)?.name ?? "Sin subcategoría" : "";
   const pathName = (categoryId: string, subcategoryId: string) =>
     [categoryName(categoryId), subcategoryName(subcategoryId)].filter(Boolean).join(" · ");
-  const expenseLabel = (expense: Expense) => expense.description.trim() || pathName(expense.categoryId, expense.subcategoryId);
   const subcategoriesFor = (categoryId: string) => {
     return linkedSubcategories(categoryId, data.categories, data.subcategories);
   };
@@ -421,15 +420,22 @@ export function ControlObraApp() {
     return id;
   };
 
-  const renderHome = () => (
-    <div className="page-content home-view">
+  const renderHome = () => {
+    const plan = data.investmentPlan;
+    const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
+    return <div className="page-content home-view">
       <section className="welcome-row">
-        <div>
-          <span className="eyebrow">Vista general</span>
-          <h1>Resumen de la obra</h1>
-          <p>Costos, pagos y saldo pendiente.</p>
-        </div>
+        <div><h1>Resumen de la obra</h1></div>
         <button className="primary-button large" onClick={() => quickOpen("expense")}>＋ Ingresar costo</button>
+      </section>
+
+      <section className="investment-plan-panel home-plan-panel">
+        <div className="investment-plan-head"><div><h2>Inversión y venta</h2></div><button className="secondary-button" onClick={() => setModal("investmentPlan")}>Editar valores</button></div>
+        <div className="investment-plan-grid">
+          <article><span>Valor de la propiedad</span><strong>{money(plan.propertyValueUsd, "USD")}</strong><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"}</small></article>
+          <article className={plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : "Dentro de lo proyectado"}</small></article>
+          <article className="sale"><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
+        </div>
       </section>
 
       <section className="summary-grid">
@@ -467,19 +473,18 @@ export function ControlObraApp() {
           <button className="secondary-button full" onClick={() => quickOpen("payment", "payments")}>Registrar un pago</button>
         </article>
 
-        <article className="panel">
-          <div className="panel-head">
-            <div><span className="eyebrow">Comparación</span><h2>Presupuesto y adicionales</h2></div>
-            <button className="text-button" onClick={() => setView("budgets")}>Ver presupuestos →</button>
+        <article className="panel home-actions-panel">
+          <h2>Acciones principales</h2>
+          <div className="home-actions">
+            <button className="secondary-button" onClick={() => setView("expenses")}>Revisar costos</button>
+            <button className="secondary-button" onClick={() => setView("payments")}>Registrar pago</button>
+            <button className="secondary-button" onClick={() => setModal("budget")}>Nuevo presupuesto</button>
           </div>
-          <div className="comparison-row"><span>Presupuestos aprobados</span><b>{money(totals.approvedArs, "ARS")}</b></div>
-          <div className="comparison-row additional"><span>Costos adicionales</span><b>+ {money(totals.additionalArs, "ARS")}</b></div>
-          <div className="comparison-total"><span>Costo real registrado</span><strong>{money(totals.committedArs, "ARS")}</strong></div>
         </article>
       </section>
 
     </div>
-  );
+  };
 
   const renderExpenses = () => {
     const filteredExpenses = data.expenses
@@ -506,7 +511,7 @@ export function ControlObraApp() {
       {remodelBudget > 0 ? <section className={`cost-budget-comparison ${remodelDifference > 0.005 ? "over" : "under"}`}>
         <div><span>Presupuesto proyectado de remodelación</span><strong>{money(remodelBudget, "USD")}</strong></div>
         <div><span>Costos reales registrados</span><strong>{money(totals.committedUsd, "USD")}</strong></div>
-        <p>{remodelDifference > 0.005 ? <>⚠ Gastaste <b>{money(remodelDifference, "USD")} más</b> que lo proyectado.</> : <>✓ Llevás <b>{money(Math.abs(remodelDifference), "USD")} menos</b> que lo proyectado.</>}</p>
+        {remodelDifference > 0.005 && <p>⚠ Gastaste <b>{money(remodelDifference, "USD")} más</b> que lo proyectado.</p>}
       </section> : <section className="cost-budget-comparison unset"><p>Definí el presupuesto proyectado en Inversores para compararlo con los costos.</p><button className="text-button" onClick={() => setView("investors")}>Ir a Inversores →</button></section>}
       <div className="expense-category-filters" aria-label="Filtrar costos por categoría">
         <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
@@ -567,31 +572,62 @@ export function ControlObraApp() {
   };
 
   const renderPayments = () => {
-    const pending = data.expenses.filter((expense) => remainingForExpense(expense) > 0.005);
+    const pending = data.expenses.filter((expense) => remainingForExpense(expense) > 0.005).slice().sort((a, b) => b.date.localeCompare(a.date));
+    const paymentDetails = (expense: Expense, remaining: number) => <InlinePaymentForm
+      expense={expense}
+      rate={rate}
+      remaining={remaining}
+      edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
+      close={() => setExpandedExpenseId("")}
+      save={(payment) => {
+        setData((current) => ({ ...current, payments: [...current.payments, payment] }));
+        setExpandedExpenseId("");
+        notify("Pago registrado");
+      }}
+    />;
     return <div className="page-content">
-      <PageHeading eyebrow="Pagos parciales" title="Pagos" copy="Pagos totales o parciales en ARS o USD." />
+      <PageHeading eyebrow="Movimientos" title="Pagos" copy="Tocá una fila para registrar un pago total o parcial." />
       {pending.length === 0 ? <EmptyState icon="✓" title="No hay pagos pendientes" copy="Los costos pendientes aparecerán acá." /> : (
-        <div className="payment-list">
-          {pending.map((expense) => {
+        <section className="payment-sheet-section">
+          <h2>Costos y saldos</h2>
+          <div className="expense-sheet-wrap expense-desktop-view">
+            <table className="expense-sheet payment-sheet">
+              <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Saldo</th></tr></thead>
+              <tbody>{pending.map((expense) => {
+                const paid = paymentForExpense(expense);
+                const remaining = remainingForExpense(expense);
+                const expanded = expandedExpenseId === expense.id;
+                const togglePayment = () => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id);
+                return <Fragment key={expense.id}><tr className={`expense-data-row ${expanded ? "expanded" : ""}`} tabIndex={0} aria-expanded={expanded} onClick={togglePayment} onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); togglePayment(); }
+                }}>
+                  <td className="date-cell">{shortDate(expense.date)}</td><td><b>{categoryName(expense.categoryId)}</b></td><td>{subcategoryName(expense.subcategoryId) || "—"}</td><td className="number-cell"><b>{money(expense.amount, expense.currency)}</b></td><td className="number-cell paid-cell">{money(paid, expense.currency)}</td><td className="number-cell balance-cell">{money(remaining, expense.currency)}</td>
+                </tr>{expanded && <tr className="expense-payment-row"><td colSpan={6}>{paymentDetails(expense, remaining)}</td></tr>}</Fragment>;
+              })}</tbody>
+            </table>
+          </div>
+          <div className="expense-mobile-list">{pending.map((expense) => {
             const paid = paymentForExpense(expense);
             const remaining = remainingForExpense(expense);
-            const percent = expense.amount ? Math.min(100, paid / expense.amount * 100) : 0;
-            return <article className="payment-card" key={expense.id}>
-              <div className="payment-card-top">
-                <div><span className="soft-label">{pathName(expense.categoryId, expense.subcategoryId)}</span><h3>{expenseLabel(expense)}</h3></div>
-                <span className="pending-pill">Pendiente</span>
-              </div>
-              <div className="payment-numbers"><span>Total <b>{money(expense.amount, expense.currency)}</b></span><span>Pagado <b>{money(paid, expense.currency)}</b></span><span>Resta <b>{money(remaining, expense.currency)}</b></span></div>
-              <ProgressBar value={percent} />
-              <button className="primary-button full" onClick={() => { setSelectedExpenseId(expense.id); setModal("payment"); }}>Registrar pago</button>
+            const expanded = expandedExpenseId === expense.id;
+            return <article className={`expense-mobile-card ${expanded ? "expanded" : ""}`} key={expense.id}>
+              <button type="button" className="expense-mobile-summary" aria-expanded={expanded} onClick={() => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id)}>
+                <div className="expense-mobile-title"><b>{categoryName(expense.categoryId)}{subcategoryName(expense.subcategoryId) ? ` · ${subcategoryName(expense.subcategoryId)}` : ""}</b><time>{shortDate(expense.date)}</time></div>
+                <div className="expense-mobile-numbers"><span>Monto <b>{money(expense.amount, expense.currency)}</b></span><span className="paid">Pagado <b>{money(paid, expense.currency)}</b></span><span className="balance">Saldo <b>{money(remaining, expense.currency)}</b></span></div>
+              </button>
+              {expanded && <div className="expense-mobile-details">{paymentDetails(expense, remaining)}</div>}
             </article>;
-          })}
-        </div>
+          })}</div>
+        </section>
       )}
-      {data.payments.length > 0 && <section className="history-section"><div className="section-title"><div><span className="eyebrow">Historial</span><h2>Últimos pagos</h2></div></div>
-        <div className="list-panel compact">{data.payments.slice().reverse().slice(0, 8).map((payment) => {
+      {data.payments.length > 0 && <section className="history-section"><div className="section-title"><div><h2>Pagos realizados</h2></div></div>
+        <div className="expense-sheet-wrap payment-history-desktop"><table className="expense-sheet payment-history-sheet"><thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Detalle</th><th className="number-cell">Monto pagado</th></tr></thead><tbody>{data.payments.slice().reverse().map((payment) => {
           const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <div className="history-row" key={payment.id}><span className="history-check">✓</span><div><b>{expense ? expenseLabel(expense) : "Costo"}</b><small>{payment.description || "Pago registrado"} · {shortDate(payment.date)}</small></div><strong>{money(payment.amount, payment.currency)}</strong></div>;
+          return <tr key={payment.id}><td className="date-cell">{shortDate(payment.date)}</td><td><b>{expense ? categoryName(expense.categoryId) : "Costo"}</b></td><td>{expense ? subcategoryName(expense.subcategoryId) || "—" : "—"}</td><td>{payment.description || "Pago registrado"}</td><td className="number-cell paid-cell"><b>{money(payment.amount, payment.currency)}</b></td></tr>;
+        })}</tbody></table></div>
+        <div className="payment-history-mobile">{data.payments.slice().reverse().map((payment) => {
+          const expense = data.expenses.find((item) => item.id === payment.expenseId);
+          return <article key={payment.id}><div><b>{expense ? pathName(expense.categoryId, expense.subcategoryId) : "Costo"}</b><time>{shortDate(payment.date)}</time></div><span>{payment.description || "Pago registrado"}</span><strong>{money(payment.amount, payment.currency)}</strong></article>;
         })}</div>
       </section>}
     </div>;
@@ -659,48 +695,44 @@ export function ControlObraApp() {
     const plan = data.investmentPlan;
     const investorCapital = investorCapitalTotal;
     const investorProfit = data.investors.reduce((sum, investor) => sum + investor.profitUsd, 0);
-    const calculatedOwnCapital = Math.max(0, plan.propertyValueUsd - investorCapital);
+    const calculatedOwnCapital = Math.max(0, plan.propertyValueUsd + plan.remodelBudgetUsd - investorCapital);
     const effectiveOwnCapital = plan.ownCapitalManual ? plan.ownCapitalUsd : calculatedOwnCapital;
     const ownCapitalDifference = effectiveOwnCapital - calculatedOwnCapital;
     const ownCapitalMismatch = plan.ownCapitalManual && Math.abs(ownCapitalDifference) > 0.005;
-    const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
-    const ownerProfit = plan.projectedSalePriceUsd > 0 ? plan.projectedSalePriceUsd - investorCapital - investorProfit - effectiveOwnCapital - totals.committedUsd : 0;
+    const ownerProfit = plan.projectedSalePriceUsd > 0 ? plan.projectedSalePriceUsd - investorCapital - investorProfit - effectiveOwnCapital : 0;
     return <div className="page-content">
       <PageHeading eyebrow="Financiamiento" title="Inversores" copy="Aportes y rendimiento." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
-
-      <section className="investment-plan-panel">
-        <div className="investment-plan-head"><div><span className="eyebrow">Proyecto en dólares</span><h2>Propiedad y proyección de venta</h2></div><button className="secondary-button" onClick={() => setModal("investmentPlan")}>Editar valores</button></div>
-        <div className="investment-plan-grid">
-          <article><span>Valor de la propiedad</span><strong>{money(plan.propertyValueUsd, "USD")}</strong><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"}</small></article>
-          <article className={plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}><span>Presupuesto proyectado de remodelación</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : `${money(Math.abs(remodelDifference), "USD")} por debajo`}</small></article>
-          <article className="sale"><span>Precio proyectado de venta</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
-        </div>
-      </section>
 
       <section className="funding-summary-grid">
         <article className={ownCapitalMismatch ? "mismatch" : ""}><span>Aporte propio</span><strong>{money(effectiveOwnCapital, "USD")}</strong><small>{plan.ownCapitalManual ? "Valor informado manualmente" : "Calculado automáticamente"}</small></article>
         <article><span>Capital de inversores</span><strong>{money(investorCapital, "USD")}</strong></article>
         <article><span>Ganancia pactada</span><strong>{money(investorProfit, "USD")}</strong></article>
         <article><span>Total a devolver</span><strong>{money(investorCapital + investorProfit, "USD")}</strong></article>
-        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada del aporte propio</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Después de costos y devolución a inversores" : "Falta cargar el precio de venta"}</small></article>
+        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada del aporte propio</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Después de la inversión y devolución a inversores" : "Falta cargar el precio de venta"}</small></article>
       </section>
-      {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según el valor de la propiedad menos el capital de inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
+      {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según propiedad + remodelación proyectada − inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
 
       {data.investors.length === 0 ? <EmptyState icon="↗" title="Todavía no hay inversores" copy="Ingresá el nombre, el primer aporte recibido y la ganancia que le vas a pagar." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} /> : <><div className="investor-sheet-wrap investor-desktop-view">
         <table className="investor-sheet">
-          <thead><tr><th>Inversor</th><th>Aportes recibidos</th><th className="number-cell">Capital en USD</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver en USD</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual simple</th><th>Acciones</th></tr></thead>
+          <thead><tr><th>Inversor</th><th>Fecha</th><th className="number-cell">Monto</th><th className="number-cell">Capital en USD</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver en USD</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual simple</th></tr></thead>
           <tbody>{data.investors.map((investor) => {
             const metrics = investorMetrics(investor, plan.projectedSaleDate);
-            return <tr key={investor.id}>
+            const expanded = expandedInvestorId === investor.id;
+            const contributions = investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
+            const toggleInvestor = () => setExpandedInvestorId((current) => current === investor.id ? "" : investor.id);
+            const editContribution = (contribution: InvestorContribution) => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); };
+            return <Fragment key={investor.id}><tr className={`investor-data-row ${expanded ? "expanded" : ""}`} tabIndex={0} aria-expanded={expanded} onClick={toggleInvestor} onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleInvestor(); }
+            }}>
               <td><b>{investor.name}</b></td>
-              <td><div className="investor-contribution-list">{investor.contributions.length === 0 ? <small>Sin aportes cargados</small> : investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <button className="investor-contribution-item" type="button" key={contribution.id} title="Tocar para editar este aporte" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</div></td>
+              <td><div className="investor-contribution-cell">{contributions.length === 0 ? <small>Sin fecha</small> : contributions.map((contribution) => <button type="button" key={contribution.id} title="Editar aporte" onClick={(event) => { event.stopPropagation(); editContribution(contribution); }}>{shortDate(contribution.date)}</button>)}</div></td>
+              <td className="number-cell"><div className="investor-contribution-cell amount">{contributions.length === 0 ? <small>Sin monto</small> : contributions.map((contribution) => <button type="button" key={contribution.id} title="Editar aporte" onClick={(event) => { event.stopPropagation(); editContribution(contribution); }}><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</div></td>
               <td className="number-cell"><b>{money(metrics.capital, "USD")}</b></td>
               <td className="number-cell profit-cell"><b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b>{(investor.profitCurrency ?? "USD") === "ARS" && <small>{money(investor.profitUsd, "USD")}</small>}</td>
               <td className="number-cell"><b>{money(metrics.capital + investor.profitUsd, "USD")}</b></td>
               <td className="number-cell">{percent(metrics.totalReturnPercent)}</td>
               <td className="number-cell annual-rate-cell">{metrics.annualRate === null ? <small className="rate-warning">{metrics.annualRateStatus}</small> : <div className="annual-rate-value"><b>{percent(metrics.annualRate)}</b><small>{Math.round(metrics.termDays ?? 0)} días</small></div>}</td>
-              <td><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar</button></div></td>
-            </tr>;
+            </tr>{expanded && <tr className="investor-actions-row"><td colSpan={8}><div><span>Tocá una fecha o un monto para editar ese aporte.</span><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar inversor</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar inversor</button></div></div></td></tr>}</Fragment>;
           })}</tbody>
         </table>
         <div className="annual-rate-help"><b>Tasa anual simple, no efectiva</b><span>Ganancia % × 365 ÷ días hasta la venta. No supone reinversión ni interés compuesto. Si hay varios aportes, usa una fecha promedio ponderada por cada monto convertido a USD.</span></div>
@@ -716,7 +748,7 @@ export function ControlObraApp() {
           </button>
           {expanded && <div className="investor-mobile-details">
             <div className="investor-mobile-stats"><span>Ganancia <b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b></span><span>A devolver <b>{money(metrics.capital + investor.profitUsd, "USD")}</b></span><span>Ganancia % <b>{percent(metrics.totalReturnPercent)}</b></span><span>Plazo <b>{metrics.termDays ? `${Math.round(metrics.termDays)} días` : "—"}</b></span></div>
-            <div className="investor-mobile-contributions"><span>Aportes recibidos</span>{investor.contributions.length === 0 ? <small>Sin aportes</small> : investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <button type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</div>
+            <div className="investor-mobile-contributions"><span>Aportes recibidos</span>{investor.contributions.length === 0 ? <small>Sin aportes</small> : <><div className="contribution-mobile-head"><span>Fecha</span><span>Monto</span></div>{investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <button type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</>}</div>
             <div className="investor-mobile-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar</button></div>
           </div>}
         </article>;
@@ -969,7 +1001,7 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
   const [salePrice, setSalePrice] = useState(plan.projectedSalePriceUsd ? plan.projectedSalePriceUsd.toString() : "");
   const [purchaseDate, setPurchaseDate] = useState(plan.purchaseDate);
   const [saleDate, setSaleDate] = useState(plan.projectedSaleDate);
-  const calculatedOwnCapital = Math.max(0, (Number(propertyValue) || 0) - investorCapitalUsd);
+  const calculatedOwnCapital = Math.max(0, (Number(propertyValue) || 0) + (Number(remodelBudget) || 0) - investorCapitalUsd);
   const manualDifference = (Number(ownCapital) || 0) - calculatedOwnCapital;
   return <Modal title="Datos de la inversión" close={close} wide><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
@@ -977,7 +1009,7 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
   }}>
     <label><span>Valor de la propiedad (USD)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label>
     <label><span>Fecha de compra de la propiedad</span><input type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} /></label>
-    <div className="calculated-own-capital span-2"><span>Aporte propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Valor de la propiedad menos {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
+    <div className="calculated-own-capital span-2"><span>Aporte propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Propiedad + remodelación proyectada − {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
     <label className="manual-own-toggle span-2"><input type="checkbox" checked={ownCapitalManual} onChange={(event) => { setOwnCapitalManual(event.target.checked); if (event.target.checked && !ownCapital) setOwnCapital(calculatedOwnCapital.toString()); }} /><span>Ingresar un aporte propio diferente al cálculo automático</span></label>
     {ownCapitalManual && <label className="span-2"><span>Aporte propio informado (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>}
     {ownCapitalManual && Math.abs(manualDifference) > 0.005 && <div className="form-alert error span-2">⚠ No coincide con el cálculo automático. Hay una diferencia de <b>{money(Math.abs(manualDifference), "USD")}</b>.</div>}
