@@ -182,7 +182,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .expense-category-filters button.active { border-color: var(--blue); background: var(--blue); color: white; }
 .expense-category-filters button.active span { background: rgba(255,255,255,.18); color: white; }
 .expense-sheet-wrap { overflow-x: auto; background: #f8faf9; border: 1px solid #a7b5ae; border-radius: 16px; box-shadow: var(--shadow); }
-.expense-sheet { width: 100%; min-width: 1050px; border-collapse: collapse; font-size: 12px; }
+.expense-sheet { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 12px; }
 .expense-sheet th { position: sticky; top: 0; z-index: 1; padding: 11px 13px; background: #cfd8d3; color: #31423a; border-right: 1px solid #bac6c0; border-bottom: 1px solid #aab8b1; text-align: left; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; }
 .expense-sheet th:last-child { border-right: 0; }
 .expense-sheet td { padding: 12px 13px; border-right: 1px solid #d5ddd9; border-bottom: 1px solid #cbd4cf; background: #f8faf9; color: #3d4c44; white-space: nowrap; }
@@ -204,17 +204,17 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .cost-budget-comparison div strong { display: block; margin-top: 5px; font-size: 15px; }
 .cost-budget-comparison p { margin: 0; color: #38644f; font-size: 12px; }
 .cost-budget-comparison.over p { color: #9d3939; }
-.expense-row-actions { display: flex; align-items: center; gap: 6px; }
 .row-payment-button { border: 1px solid #267a59; border-radius: 8px; background: #d9eee4; color: #206c4e; padding: 7px 10px; font-size: 11px; font-weight: 800; }
 .row-payment-button:hover { background: var(--green); color: white; }
 .expense-sheet .expense-payment-row td { padding: 0; background: #dfe7e3; border-right: 0; border-bottom: 2px solid #93a79d; white-space: normal; }
 .expense-sheet .expense-payment-row:hover td { background: #dfe7e3; }
 .inline-payment-panel { padding: 19px 22px 22px; }
-.inline-payment-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
-.inline-payment-head > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
-.inline-payment-head span { color: var(--green); text-transform: uppercase; letter-spacing: .06em; font-size: 9px; font-weight: 900; }
-.inline-payment-head strong { font-size: 15px; }
-.inline-payment-head small { color: #526159; font-size: 11px; }
+.expense-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.expense-detail-grid { display: grid; grid-template-columns: repeat(2,minmax(150px,1fr)); gap: 12px 28px; flex: 1; }
+.expense-detail-grid div { display: grid; gap: 4px; }
+.expense-detail-grid span { color: #526159; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
+.expense-detail-grid b { font-size: 12px; }
+.expense-detail-actions { display: flex; align-items: center; gap: 7px; }
 .inline-payment-form { display: grid; grid-template-columns: minmax(150px,.65fr) minmax(360px,1.5fr) minmax(220px,1fr) auto; align-items: end; gap: 12px; }
 .inline-payment-form > label { display: grid; gap: 7px; }
 .inline-payment-form label > span, .inline-payment-form .amount-field > span { color: #526159; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
@@ -275,7 +275,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investment-plan-panel { margin-bottom: 18px; padding: 22px; border: 1px solid #9eafa6; border-radius: 19px; background: #f8faf9; box-shadow: var(--shadow); }
 .investment-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .investment-plan-head h2 { margin: 5px 0 0; font-size: 20px; }
-.investment-plan-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 11px; }
+.investment-plan-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 11px; }
 .investment-plan-grid article { min-height: 116px; padding: 16px; border: 1px solid #b7c3bd; border-radius: 13px; background: #e8edeb; }
 .investment-plan-grid article.automatic { border-color: #9fc3cf; background: var(--blue-soft); }
 .investment-plan-grid article.sale { border-color: #96c5af; background: var(--green-soft); }
@@ -477,5 +477,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .cost-budget-comparison, .cost-budget-comparison.unset { display: grid; grid-template-columns: 1fr; gap: 10px; }
   .investment-alert { align-items: flex-start; display: grid; }
   .investment-alert .text-button { margin-left: 0; justify-self: start; }
+  .expense-detail-head { align-items: flex-start; }
+  .expense-detail-grid { grid-template-columns: 1fr; }
   .bottom-nav button small { font-size: 8px; }
 }

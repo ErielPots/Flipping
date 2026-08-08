@@ -237,7 +237,7 @@ function FormattedAmountInput({ value, setValue, ariaLabel, placeholder = "0", r
 
 const nav: Array<{ id: View; label: string; icon: string }> = [
   { id: "home", label: "Resumen", icon: "⌂" },
-  { id: "expenses", label: "Gastos", icon: "$" },
+  { id: "expenses", label: "Costos", icon: "$" },
   { id: "payments", label: "Pagos", icon: "✓" },
   { id: "budgets", label: "Presupuestos", icon: "≡" },
   { id: "investors", label: "Inversores", icon: "↗" },
@@ -419,10 +419,10 @@ export function ControlObraApp() {
       <section className="welcome-row">
         <div>
           <span className="eyebrow">Vista general</span>
-          <h1>Todo lo importante, de un vistazo.</h1>
-          <p>Costos, pagos y avance físico se calculan por separado para que cada número sea claro.</p>
+          <h1>Resumen de la obra</h1>
+          <p>Costos, pagos y saldo pendiente.</p>
         </div>
-        <button className="primary-button large" onClick={() => quickOpen("expense")}>＋ Ingresar gasto</button>
+        <button className="primary-button large" onClick={() => quickOpen("expense")}>＋ Ingresar costo</button>
       </section>
 
       <section className="summary-grid">
@@ -466,7 +466,7 @@ export function ControlObraApp() {
             <button className="text-button" onClick={() => setView("budgets")}>Ver presupuestos →</button>
           </div>
           <div className="comparison-row"><span>Presupuestos aprobados</span><b>{money(totals.approvedArs, "ARS")}</b></div>
-          <div className="comparison-row additional"><span>Gastos adicionales</span><b>+ {money(totals.additionalArs, "ARS")}</b></div>
+          <div className="comparison-row additional"><span>Costos adicionales</span><b>+ {money(totals.additionalArs, "ARS")}</b></div>
           <div className="comparison-total"><span>Costo real registrado</span><strong>{money(totals.committedArs, "ARS")}</strong></div>
         </article>
       </section>
@@ -474,7 +474,7 @@ export function ControlObraApp() {
       <section className="quick-section">
         <div className="section-title"><div><span className="eyebrow">Accesos rápidos</span><h2>¿Qué querés hacer?</h2></div></div>
         <div className="quick-grid">
-          <button onClick={() => quickOpen("expense")}><span className="quick-icon blue">＋</span><b>Ingresar gasto</b><small>Nuevo movimiento</small></button>
+          <button onClick={() => quickOpen("expense")}><span className="quick-icon blue">＋</span><b>Ingresar costo</b><small>Nuevo movimiento</small></button>
           <button onClick={() => quickOpen("payment", "payments")}><span className="quick-icon green">$</span><b>Ingresar pago</b><small>Total o parcial</small></button>
           <button onClick={() => quickOpen("budget", "budgets")}><span className="quick-icon amber">≡</span><b>Nuevo presupuesto</b><small>Comparar proveedores</small></button>
         </div>
@@ -491,23 +491,23 @@ export function ControlObraApp() {
     const remodelDifference = totals.committedUsd - remodelBudget;
 
     return <div className="page-content">
-      <PageHeading eyebrow="Movimientos" title="Gastos" copy="Tocá cualquier fila para registrar un pago sin salir de esta pantalla." action="Ingresar gasto" onAction={() => setModal("expense")} />
+      <PageHeading eyebrow="Movimientos" title="Costos" copy="Tocá una fila para ver detalles y acciones." action="Ingresar costo" onAction={() => setModal("expense")} />
       {remodelBudget > 0 ? <section className={`cost-budget-comparison ${remodelDifference > 0.005 ? "over" : "under"}`}>
         <div><span>Presupuesto proyectado de remodelación</span><strong>{money(remodelBudget, "USD")}</strong></div>
         <div><span>Costos reales registrados</span><strong>{money(totals.committedUsd, "USD")}</strong></div>
         <p>{remodelDifference > 0.005 ? <>⚠ Gastaste <b>{money(remodelDifference, "USD")} más</b> que lo proyectado.</> : <>✓ Llevás <b>{money(Math.abs(remodelDifference), "USD")} menos</b> que lo proyectado.</>}</p>
-      </section> : <section className="cost-budget-comparison unset"><p>Definí el presupuesto proyectado de remodelación en Inversores para compararlo con los gastos reales.</p><button className="text-button" onClick={() => setView("investors")}>Ir a Inversores →</button></section>}
-      <div className="expense-category-filters" aria-label="Filtrar gastos por categoría">
+      </section> : <section className="cost-budget-comparison unset"><p>Definí el presupuesto proyectado en Inversores para compararlo con los costos.</p><button className="text-button" onClick={() => setView("investors")}>Ir a Inversores →</button></section>}
+      <div className="expense-category-filters" aria-label="Filtrar costos por categoría">
         <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
         {categories.map((category) => {
           const count = data.expenses.filter((expense) => expense.categoryId === category.id).length;
           return <button key={category.id} className={expenseCategoryFilter === category.id ? "active" : ""} onClick={() => setExpenseCategoryFilter(category.id)}>{category.name} <span>{count}</span></button>;
         })}
       </div>
-      {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay gastos" copy="Ingresá el primer gasto o aprobá un presupuesto para comenzar." action="Ingresar gasto" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay gastos en esta categoría.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
+      {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay costos" copy="Ingresá el primer costo para comenzar." action="Ingresar costo" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay costos en esta categoría.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
         <div className="expense-sheet-wrap">
           <table className="expense-sheet">
-            <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Descripción</th><th>Responsable</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Saldo</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th className="number-cell">Monto</th><th className="number-cell">Saldo</th><th className="number-cell">Pagado</th></tr></thead>
             <tbody>{filteredExpenses.map((expense) => {
               const paid = paymentForExpense(expense);
               const remaining = remainingForExpense(expense);
@@ -528,21 +528,16 @@ export function ControlObraApp() {
                 <td className="date-cell">{shortDate(expense.date)}</td>
                 <td><b>{categoryName(expense.categoryId)}</b></td>
                 <td>{subcategoryName(expense.subcategoryId) || "—"}</td>
-                <td>{expense.description || "—"}</td>
-                <td>{expense.responsible || "—"}</td>
                 <td className="number-cell"><b>{money(expense.amount, expense.currency)}</b></td>
-                <td className="number-cell paid-cell">{money(paid, expense.currency)}</td>
                 <td className="number-cell balance-cell">{money(remaining, expense.currency)}</td>
-                <td><div className="expense-row-actions">
-                  <button className="row-payment-button" type="button" onClick={(event) => { event.stopPropagation(); togglePayment(); }}>{expanded ? "Cerrar" : remaining > 0.005 ? "Pagar" : "Ver"}</button>
-                  <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); setSelectedExpenseId(expense.id); setModal("expense"); }}>Editar</button>
-                </div></td>
+                <td className="number-cell paid-cell">{money(paid, expense.currency)}</td>
               </tr>
-              {expanded && <tr className="expense-payment-row"><td colSpan={9}>
+              {expanded && <tr className="expense-payment-row"><td colSpan={6}>
                 <InlinePaymentForm
                   expense={expense}
                   rate={rate}
                   remaining={remaining}
+                  edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
                   close={() => setExpandedExpenseId("")}
                   save={(payment) => {
                     setData((current) => ({ ...current, payments: [...current.payments, payment] }));
@@ -562,8 +557,8 @@ export function ControlObraApp() {
   const renderPayments = () => {
     const pending = data.expenses.filter((expense) => remainingForExpense(expense) > 0.005);
     return <div className="page-content">
-      <PageHeading eyebrow="Pagos parciales" title="Pagos" copy="Elegí un gasto pendiente y registrá lo que pagaste, en pesos o dólares." />
-      {pending.length === 0 ? <EmptyState icon="✓" title="No hay pagos pendientes" copy="Cuando cargues un gasto, aparecerá acá para registrar pagos." /> : (
+      <PageHeading eyebrow="Pagos parciales" title="Pagos" copy="Pagos totales o parciales en ARS o USD." />
+      {pending.length === 0 ? <EmptyState icon="✓" title="No hay pagos pendientes" copy="Los costos pendientes aparecerán acá." /> : (
         <div className="payment-list">
           {pending.map((expense) => {
             const paid = paymentForExpense(expense);
@@ -584,7 +579,7 @@ export function ControlObraApp() {
       {data.payments.length > 0 && <section className="history-section"><div className="section-title"><div><span className="eyebrow">Historial</span><h2>Últimos pagos</h2></div></div>
         <div className="list-panel compact">{data.payments.slice().reverse().slice(0, 8).map((payment) => {
           const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <div className="history-row" key={payment.id}><span className="history-check">✓</span><div><b>{expense?.description ?? "Gasto"}</b><small>{payment.description || "Pago registrado"} · {shortDate(payment.date)}</small></div><strong>{money(payment.amount, payment.currency)}</strong></div>;
+          return <div className="history-row" key={payment.id}><span className="history-check">✓</span><div><b>{expense?.description ?? "Costo"}</b><small>{payment.description || "Pago registrado"} · {shortDate(payment.date)}</small></div><strong>{money(payment.amount, payment.currency)}</strong></div>;
         })}</div>
       </section>}
     </div>;
@@ -606,7 +601,7 @@ export function ControlObraApp() {
 
   const renderBudgets = () => (
     <div className="page-content">
-      <PageHeading eyebrow="Comparaciones" title="Presupuestos" copy="Compará todas las ofertas y aprobá una completa cuando decidas." action="Nueva comparación" onAction={() => setModal("budget")} />
+      <PageHeading eyebrow="Comparaciones" title="Presupuestos" copy="Compará ofertas y elegí una." action="Nueva comparación" onAction={() => setModal("budget")} />
       {data.budgetGroups.length === 0 ? <EmptyState icon="≡" title="No hay presupuestos cargados" copy="Creá una comparación y agregá uno o varios proveedores." action="Nueva comparación" onAction={() => setModal("budget")} /> : (
         <div className="budget-groups">{data.budgetGroups.map((group) => {
           const amounts = group.offers.map((offer) => toArs(offer.amount, offer.currency, offer.rate));
@@ -659,14 +654,13 @@ export function ControlObraApp() {
     const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
     const ownerProfit = plan.projectedSalePriceUsd > 0 ? plan.projectedSalePriceUsd - investorCapital - investorProfit - effectiveOwnCapital - totals.committedUsd : 0;
     return <div className="page-content">
-      <PageHeading eyebrow="Financiamiento" title="Inversores" copy="Registrá la propiedad, los aportes recibidos y la rentabilidad estimada de cada inversor." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
+      <PageHeading eyebrow="Financiamiento" title="Inversores" copy="Aportes y rendimiento." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
 
       <section className="investment-plan-panel">
         <div className="investment-plan-head"><div><span className="eyebrow">Proyecto en dólares</span><h2>Propiedad y proyección de venta</h2></div><button className="secondary-button" onClick={() => setModal("investmentPlan")}>Editar valores</button></div>
         <div className="investment-plan-grid">
           <article><span>Valor de la propiedad</span><strong>{money(plan.propertyValueUsd, "USD")}</strong><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"}</small></article>
           <article className={plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}><span>Presupuesto proyectado de remodelación</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : `${money(Math.abs(remodelDifference), "USD")} por debajo`}</small></article>
-          <article className="automatic"><span>Gastos registrados</span><strong>{money(totals.committedUsd, "USD")}</strong><small>Se calcula desde Gastos</small></article>
           <article className="sale"><span>Precio proyectado de venta</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
         </div>
       </section>
@@ -676,10 +670,9 @@ export function ControlObraApp() {
         <article><span>Capital de inversores</span><strong>{money(investorCapital, "USD")}</strong></article>
         <article><span>Ganancia pactada</span><strong>{money(investorProfit, "USD")}</strong></article>
         <article><span>Total a devolver</span><strong>{money(investorCapital + investorProfit, "USD")}</strong></article>
-        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada del aporte propio</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Después de gastos y devolución a inversores" : "Falta cargar el precio de venta"}</small></article>
+        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada del aporte propio</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Después de costos y devolución a inversores" : "Falta cargar el precio de venta"}</small></article>
       </section>
       {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según el valor de la propiedad menos el capital de inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
-      {plan.remodelBudgetUsd > 0 && <div className={`investment-alert ${remodelDifference > 0.005 ? "error" : "success"}`}><b>{remodelDifference > 0.005 ? "⚠ Presupuesto de remodelación superado" : "✓ Gastos dentro de lo proyectado"}</b><span>{remodelDifference > 0.005 ? `Gastaste ${money(remodelDifference, "USD")} más que lo proyectado.` : `Llevás ${money(Math.abs(remodelDifference), "USD")} menos que lo proyectado.`}</span></div>}
 
       {data.investors.length === 0 ? <EmptyState icon="↗" title="Todavía no hay inversores" copy="Ingresá el nombre, el primer aporte recibido y la ganancia que le vas a pagar." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} /> : <div className="investor-sheet-wrap">
         <table className="investor-sheet">
@@ -739,7 +732,7 @@ export function ControlObraApp() {
       budgetGroups: current.budgetGroups.map((item) => item.id === groupId ? { ...item, approvedOfferId: offerId } : item),
       expenses: [...current.expenses, expense],
     }));
-    notify("Presupuesto aprobado y agregado a Gastos");
+    notify("Presupuesto aprobado y agregado a Costos");
   };
 
   const renameItem = (collection: "categories" | "subcategories", item: Category) => {
@@ -776,11 +769,11 @@ export function ControlObraApp() {
       </section>
 
       <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>
-      <button className="mobile-fab" aria-label="Ingresar gasto" onClick={() => setModal("expense")}>＋</button>
+      <button className="mobile-fab" aria-label="Ingresar costo" onClick={() => setModal("expense")}>＋</button>
 
       {modal === "expense" && <ExpenseModal data={data} rate={rate} expense={data.expenses.find((item) => item.id === selectedExpenseId)} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(expense) => {
         setData((current) => ({ ...current, expenses: current.expenses.some((item) => item.id === expense.id) ? current.expenses.map((item) => item.id === expense.id ? expense : item) : [...current.expenses, expense] }));
-        setModal(null); setSelectedExpenseId(""); notify("Gasto guardado");
+        setModal(null); setSelectedExpenseId(""); notify("Costo guardado");
       }} />}
       {modal === "payment" && <PaymentModal data={data} rate={rate} initialExpenseId={selectedExpenseId} remainingForExpense={remainingForExpense} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedExpenseId(""); notify("Pago registrado"); }} />}
       {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
@@ -809,7 +802,7 @@ function EmptyState({ icon, title, copy, action, onAction }: { icon: string; tit
 }
 
 function KindBadge({ kind }: { kind: ExpenseKind }) {
-  return <span className={`kind-badge ${kind}`}>{kind === "approved" ? "Presupuesto aprobado" : kind === "additional" ? "Gasto adicional" : "Gasto"}</span>;
+  return <span className={`kind-badge ${kind}`}>{kind === "approved" ? "Presupuesto aprobado" : kind === "additional" ? "Costo adicional" : "Costo"}</span>;
 }
 
 function CategorySelect({ label, value, setValue, items, onNew }: { label: string; value: string; setValue: (value: string) => void; items: Category[]; onNew: () => string }) {
@@ -840,19 +833,19 @@ function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCate
     if (Number(amount) <= 0) return;
     save({ id: expense?.id ?? uid("exp"), date, description: description.trim(), categoryId, subcategoryId, responsible: responsible.trim(), amount: Number(amount), currency, rate: selectedRate, kind: expense?.kind ?? "manual", budgetGroupId: expense?.budgetGroupId });
   };
-  return <Modal title={expense ? "Editar gasto" : "Ingresar gasto"} close={close} wide><form className="form-grid" onSubmit={submit}>
+  return <Modal title={expense ? "Editar costo" : "Ingresar costo"} close={close} wide><form className="form-grid" onSubmit={submit}>
     <CategorySelect label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={data.categories} onNew={() => addNamedItem("category")} />
     <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={data.categories} subcategories={data.subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />
-    <label className="span-2"><span>Descripción del gasto (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
+    <label className="span-2"><span>Descripción del costo (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
     <label><span>Fecha</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
     <label><span>Responsable (opcional)</span><input value={responsible} onChange={(event) => setResponsible(event.target.value)} placeholder="Arquitecto, albañil…" /></label>
     <div className="amount-field span-2"><span>Monto</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`Monto en ${currency}`} required value={amount} setValue={setAmount} placeholder={currency} /></label></div></div>
     {amount && <div className="conversion-note span-2">Equivale a <b>{currency === "ARS" ? money(Number(amount) / selectedRate, "USD") : money(Number(amount) * selectedRate, "ARS")}</b> usando dólar {money(selectedRate, "ARS")}.</div>}
-    <FormActions close={close} label={expense ? "Guardar cambios" : "Guardar gasto"} />
+    <FormActions close={close} label={expense ? "Guardar cambios" : "Guardar costo"} />
   </form></Modal>;
 }
 
-function InlinePaymentForm({ expense, rate, remaining, close, save }: { expense: Expense; rate: number; remaining: number; close: () => void; save: (payment: Payment) => void }) {
+function InlinePaymentForm({ expense, rate, remaining, edit, close, save }: { expense: Expense; rate: number; remaining: number; edit: () => void; close: () => void; save: (payment: Payment) => void }) {
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -874,11 +867,11 @@ function InlinePaymentForm({ expense, rate, remaining, close, save }: { expense:
   };
 
   return <div className="inline-payment-panel">
-    <div className="inline-payment-head">
-      <div><span>Pago para este gasto</span><strong>{expense.description || "Gasto sin descripción"}</strong><small>Saldo pendiente: {money(remaining, expense.currency)}</small></div>
-      <button type="button" className="icon-button" onClick={close} aria-label="Cerrar pago">×</button>
+    <div className="expense-detail-head">
+      <div className="expense-detail-grid"><div><span>Descripción</span><b>{expense.description || "Sin descripción"}</b></div><div><span>Responsable</span><b>{expense.responsible || "Sin responsable"}</b></div></div>
+      <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar costo</button><button type="button" className="icon-button" onClick={close} aria-label="Cerrar detalles">×</button></div>
     </div>
-    {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este gasto ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : <form className="inline-payment-form" onSubmit={submit}>
+    {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este costo ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : <form className="inline-payment-form" onSubmit={submit}>
       <label><span>Fecha del pago</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       <div className="amount-field"><span>Monto pagado</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={(value) => { setCurrency(value); setAmount(""); }} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`Monto pagado en ${currency}`} required invalid={Number(amount) > maxAmount + 0.005} value={amount} setValue={setAmount} placeholder={currency} /></label></div></div>
       <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
@@ -897,7 +890,7 @@ function PaymentModal({ data, rate, initialExpenseId, remainingForExpense, close
   const expense = data.expenses.find((item) => item.id === expenseId);
   const submit = (event: FormEvent) => { event.preventDefault(); if (Number(amount) <= 0) return; save({ id: uid("pay"), expenseId, date, description: description.trim(), amount: Number(amount), currency, rate }); };
   return <Modal title="Registrar pago" close={close}><form className="form-grid" onSubmit={submit}>
-    <label className="span-2"><span>Gasto a pagar</span><select required value={expenseId} onChange={(event) => setExpenseId(event.target.value)}><option value="">Elegir gasto…</option>{data.expenses.filter((item) => remainingForExpense(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{item.description} · resta {money(remainingForExpense(item), item.currency)}</option>)}</select></label>
+    <label className="span-2"><span>Costo a pagar</span><select required value={expenseId} onChange={(event) => setExpenseId(event.target.value)}><option value="">Elegir costo…</option>{data.expenses.filter((item) => remainingForExpense(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{item.description || data.categories.find((category) => category.id === item.categoryId)?.name || "Costo"} · resta {money(remainingForExpense(item), item.currency)}</option>)}</select></label>
     <label><span>Fecha del pago</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
     <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
     <label><span>Monto pagado</span><FormattedAmountInput required value={amount} setValue={setAmount} /></label>
@@ -964,7 +957,7 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
     <label><span>Presupuesto proyectado de remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>
     <label><span>Precio proyectado de venta (USD)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="USD" /></label>
     <label className="span-2"><span>Fecha proyectada de venta</span><input type="date" value={saleDate} onChange={(event) => setSaleDate(event.target.value)} /></label>
-    <div className="source-note span-2"><span>Dato automático</span><b>Los gastos reales de remodelación se calculan desde la pantalla Gastos.</b></div>
+    <div className="source-note span-2"><span>Dato automático</span><b>Los costos reales se calculan desde la pantalla Costos.</b></div>
     <FormActions close={close} label="Guardar valores" />
   </form></Modal>;
 }
