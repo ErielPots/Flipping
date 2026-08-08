@@ -3,7 +3,7 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
 type Currency = "ARS" | "USD";
-type Category = { id: string; name: string; archived: boolean };
+type Category = { id: string; name: string; archived: boolean; subcategoryIds?: string[] };
 type Subcategory = Category;
 type ExpenseKind = "manual" | "approved" | "additional";
 type Expense = {
@@ -47,6 +47,7 @@ type BudgetGroup = {
   approvedOfferId?: string;
 };
 type AppState = {
+  catalogVersion?: number;
   categories: Category[];
   subcategories: Subcategory[];
   expenses: Expense[];
@@ -57,18 +58,68 @@ type AppState = {
 type View = "home" | "expenses" | "payments" | "progress" | "budgets" | "categories";
 type ModalName = "expense" | "payment" | "progress" | "budget" | "offer" | "rate" | null;
 
+const defaultSubcategories: Subcategory[] = [
+  { id: "sub-mano-obra", name: "Mano de obra", archived: false },
+  { id: "sub-materiales", name: "Materiales", archived: false },
+  { id: "sub-adicionales", name: "Adicionales", archived: false },
+];
+
+const defaultCategories: Category[] = [
+  { id: "cat-contratista", name: "Contratista", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales", "sub-adicionales"] },
+  { id: "cat-electricista", name: "Electricista", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+  { id: "cat-plomeria", name: "Plomería", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+  { id: "cat-pintor", name: "Pintor", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+  { id: "cat-colocador-pisos", name: "Colocador de pisos", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+  { id: "cat-zinguero", name: "Zinguero", archived: false, subcategoryIds: [] },
+  { id: "cat-muebles-cocina", name: "Muebles de cocina", archived: false, subcategoryIds: [] },
+  { id: "cat-placares", name: "Placares", archived: false, subcategoryIds: [] },
+  { id: "cat-ventanas", name: "Ventanas", archived: false, subcategoryIds: [] },
+];
+
 const initialState: AppState = {
-  categories: [
-    { id: "cat-materiales", name: "Materiales", archived: false },
-    { id: "cat-mano-obra", name: "Mano de obra", archived: false },
-    { id: "cat-electricista", name: "Electricista", archived: false },
-  ],
-  subcategories: [{ id: "sub-bano-cocina", name: "Baño y cocina", archived: false }],
+  catalogVersion: 2,
+  categories: defaultCategories,
+  subcategories: defaultSubcategories,
   expenses: [],
   payments: [],
   progress: [],
   budgetGroups: [],
 };
+
+function normalizeState(candidate: AppState | undefined): AppState {
+  if (!candidate?.categories || !candidate?.subcategories) return initialState;
+  if ((candidate.catalogVersion ?? 0) >= 2) return candidate;
+
+  const referencedCategories = new Set([
+    ...candidate.expenses.map((item) => item.categoryId),
+    ...candidate.progress.map((item) => item.categoryId),
+    ...candidate.budgetGroups.map((item) => item.categoryId),
+  ]);
+  const referencedSubcategories = new Set([
+    ...candidate.expenses.map((item) => item.subcategoryId),
+    ...candidate.progress.map((item) => item.subcategoryId),
+    ...candidate.budgetGroups.map((item) => item.subcategoryId),
+  ]);
+  const defaultCategoryIds = new Set(defaultCategories.map((item) => item.id));
+  const defaultSubcategoryIds = new Set(defaultSubcategories.map((item) => item.id));
+  const oldSeedCategories = new Set(["cat-materiales", "cat-mano-obra"]);
+
+  const preservedCategories = candidate.categories
+    .filter((item) => !defaultCategoryIds.has(item.id))
+    .filter((item) => !oldSeedCategories.has(item.id) || referencedCategories.has(item.id))
+    .map((item) => oldSeedCategories.has(item.id) ? { ...item, archived: true } : item);
+  const preservedSubcategories = candidate.subcategories
+    .filter((item) => !defaultSubcategoryIds.has(item.id))
+    .filter((item) => item.id !== "sub-bano-cocina" || referencedSubcategories.has(item.id))
+    .map((item) => item.id === "sub-bano-cocina" ? { ...item, archived: true } : item);
+
+  return {
+    ...candidate,
+    catalogVersion: 2,
+    categories: [...defaultCategories, ...preservedCategories],
+    subcategories: [...defaultSubcategories, ...preservedSubcategories],
+  };
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -86,6 +137,12 @@ const toArs = (amount: number, currency: Currency, rate: number) =>
   currency === "ARS" ? amount : amount * rate;
 const toUsd = (amount: number, currency: Currency, rate: number) =>
   currency === "USD" ? amount : amount / rate;
+const linkedSubcategories = (categoryId: string, categories: Category[], subcategories: Subcategory[]) => {
+  const category = categories.find((item) => item.id === categoryId);
+  if (!category) return [];
+  if (!Array.isArray(category.subcategoryIds)) return subcategories.filter((item) => !item.archived);
+  return subcategories.filter((item) => !item.archived && category.subcategoryIds?.includes(item.id));
+};
 
 const nav: Array<{ id: View; label: string; icon: string }> = [
   { id: "home", label: "Resumen", icon: "⌂" },
@@ -149,7 +206,7 @@ export function ControlObraApp() {
       fetch("/api/exchange-rate").then((response) => response.ok ? response.json() : Promise.reject()),
     ])
       .then(([stateResult, rateResult]) => {
-        setData(stateResult.state ?? initialState);
+        setData(normalizeState(stateResult.state));
         setRate(Number(rateResult.rate) || 1500);
         setRateDate((rateResult.date ?? today()).slice(0, 10));
         setRateSource(rateResult.source ?? "BCRA · promedio vendedor");
@@ -158,7 +215,7 @@ export function ControlObraApp() {
       .catch(async () => {
         try {
           const stateResponse = await fetch("/api/state");
-          if (stateResponse.ok) setData((await stateResponse.json()).state ?? initialState);
+          if (stateResponse.ok) setData(normalizeState((await stateResponse.json()).state));
         } catch { /* El editor local puede iniciar antes que la base. */ }
         setSaveStatus("offline");
       })
@@ -186,7 +243,12 @@ export function ControlObraApp() {
   const categories = data.categories.filter((item) => !item.archived);
   const subcategories = data.subcategories.filter((item) => !item.archived);
   const categoryName = (id: string) => data.categories.find((item) => item.id === id)?.name ?? "Sin categoría";
-  const subcategoryName = (id: string) => data.subcategories.find((item) => item.id === id)?.name ?? "Sin subcategoría";
+  const subcategoryName = (id: string) => id ? data.subcategories.find((item) => item.id === id)?.name ?? "Sin subcategoría" : "";
+  const pathName = (categoryId: string, subcategoryId: string) =>
+    [categoryName(categoryId), subcategoryName(subcategoryId)].filter(Boolean).join(" · ");
+  const subcategoriesFor = (categoryId: string) => {
+    return linkedSubcategories(categoryId, data.categories, data.subcategories);
+  };
   const paymentForExpense = (expense: Expense) => data.payments
     .filter((payment) => payment.expenseId === expense.id)
     .reduce((sum, payment) => {
@@ -233,12 +295,24 @@ export function ControlObraApp() {
     const name = window.prompt(`Nombre de la nueva ${label}`)?.trim();
     if (!name) return "";
     const id = uid(kind === "category" ? "cat" : "sub");
+    setData((current) => kind === "category"
+      ? { ...current, categories: [...current.categories, { id, name, archived: false, subcategoryIds: [] }] }
+      : { ...current, subcategories: [...current.subcategories, { id, name, archived: false }] });
+    return id;
+  };
+
+  const addSubcategoryForCategory = (categoryId: string) => {
+    if (!categoryId) return "";
+    const name = window.prompt("Nombre de la nueva subcategoría")?.trim();
+    if (!name) return "";
+    const existing = data.subcategories.find((item) => item.name.toLocaleLowerCase("es") === name.toLocaleLowerCase("es"));
+    const id = existing?.id ?? uid("sub");
     setData((current) => ({
       ...current,
-      [kind === "category" ? "categories" : "subcategories"]: [
-        ...current[kind === "category" ? "categories" : "subcategories"],
-        { id, name, archived: false },
-      ],
+      subcategories: existing ? current.subcategories : [...current.subcategories, { id, name, archived: false }],
+      categories: current.categories.map((category) => category.id === categoryId
+        ? { ...category, subcategoryIds: Array.from(new Set([...(category.subcategoryIds ?? []), id])) }
+        : category),
     }));
     return id;
   };
@@ -331,7 +405,7 @@ export function ControlObraApp() {
               <div className={`type-dot ${expense.kind}`} />
               <div className="expense-main">
                 <div className="row-title"><b>{expense.description}</b><KindBadge kind={expense.kind} /></div>
-                <small>{categoryName(expense.categoryId)} · {subcategoryName(expense.subcategoryId)}{expense.responsible ? ` · ${expense.responsible}` : ""}</small>
+                <small>{pathName(expense.categoryId, expense.subcategoryId)}{expense.responsible ? ` · ${expense.responsible}` : ""}</small>
               </div>
               <div className="expense-progress"><ProgressBar value={percent} tone={percent >= 100 ? "green" : "blue"} /><small>{Math.round(percent)}% pagado</small></div>
               <div className="expense-amount"><b>{money(expense.amount, expense.currency)}</b><small>Resta {money(remaining, expense.currency)}</small></div>
@@ -356,7 +430,7 @@ export function ControlObraApp() {
             const percent = expense.amount ? Math.min(100, paid / expense.amount * 100) : 0;
             return <article className="payment-card" key={expense.id}>
               <div className="payment-card-top">
-                <div><span className="soft-label">{categoryName(expense.categoryId)} · {subcategoryName(expense.subcategoryId)}</span><h3>{expense.description}</h3></div>
+                <div><span className="soft-label">{pathName(expense.categoryId, expense.subcategoryId)}</span><h3>{expense.description}</h3></div>
                 <span className="pending-pill">Pendiente</span>
               </div>
               <div className="payment-numbers"><span>Total <b>{money(expense.amount, expense.currency)}</b></span><span>Pagado <b>{money(paid, expense.currency)}</b></span><span>Resta <b>{money(remaining, expense.currency)}</b></span></div>
@@ -380,7 +454,7 @@ export function ControlObraApp() {
       <PageHeading eyebrow="Avance físico" title="Progreso de la obra" copy="Este porcentaje es independiente de lo que se pagó." action="Agregar sector" onAction={() => setModal("progress")} />
       {data.progress.length === 0 ? <EmptyState icon="%" title="Todavía no cargaste avances" copy="Agregá un sector de la obra y marcá su progreso entre 0% y 100%." action="Agregar sector" onAction={() => setModal("progress")} /> : (
         <div className="progress-grid">{data.progress.map((item) => <article className="progress-card" key={item.id}>
-          <div className="progress-card-head"><div><span className="soft-label">{categoryName(item.categoryId)}</span><h3>{subcategoryName(item.subcategoryId)}</h3></div><strong>{item.percent}%</strong></div>
+          <div className="progress-card-head"><div><span className="soft-label">{item.subcategoryId ? categoryName(item.categoryId) : "Categoría general"}</span><h3>{subcategoryName(item.subcategoryId) || categoryName(item.categoryId)}</h3></div><strong>{item.percent}%</strong></div>
           <input className="range" type="range" min="0" max="100" step="5" value={item.percent} onChange={(event) => setData((current) => ({ ...current, progress: current.progress.map((progress) => progress.id === item.id ? { ...progress, percent: Number(event.target.value) } : progress) }))} />
           <ProgressBar value={item.percent} tone={item.percent === 100 ? "green" : "blue"} />
           <div className="status-line"><span className={`status-dot ${item.percent === 100 ? "done" : item.percent > 0 ? "doing" : "todo"}`} />{item.percent === 100 ? "Terminado" : item.percent > 0 ? "En progreso" : "Sin comenzar"}</div>
@@ -398,7 +472,7 @@ export function ControlObraApp() {
           const cheapest = amounts.length ? Math.min(...amounts) : 0;
           const approved = group.offers.find((offer) => offer.id === group.approvedOfferId);
           return <section className="budget-group" key={group.id}>
-            <div className="budget-group-head"><div><span className="soft-label">{categoryName(group.categoryId)} · {subcategoryName(group.subcategoryId)}</span><h2>{group.name}</h2></div><div className="budget-head-actions">{approved && <span className="approved-pill">✓ {approved.supplier}</span>}<button className="secondary-button" onClick={() => { setSelectedBudgetId(group.id); setModal("offer"); }}>＋ Agregar oferta</button></div></div>
+            <div className="budget-group-head"><div><span className="soft-label">{pathName(group.categoryId, group.subcategoryId)}</span><h2>{group.name}</h2></div><div className="budget-head-actions">{approved && <span className="approved-pill">✓ {approved.supplier}</span>}<button className="secondary-button" onClick={() => { setSelectedBudgetId(group.id); setModal("offer"); }}>＋ Agregar oferta</button></div></div>
             {group.offers.length === 0 ? <div className="inline-empty">Todavía no hay ofertas en esta comparación.</div> : <div className="offers-grid">{group.offers.map((offer) => {
               const ars = toArs(offer.amount, offer.currency, offer.rate);
               const isApproved = offer.id === group.approvedOfferId;
@@ -420,11 +494,22 @@ export function ControlObraApp() {
   const renderCategories = () => (
     <div className="page-content">
       <PageHeading eyebrow="Organización" title="Categorías y subcategorías" copy="Podés agregar, renombrar o archivar opciones en cualquier momento." />
-      <div className="manage-grid">
-        <ManageList title="Categorías" items={categories} onAdd={() => addNamedItem("category")} onRename={(item) => renameItem("categories", item)} onArchive={(item) => archiveItem("categories", item)} />
-        <ManageList title="Subcategorías" items={subcategories} onAdd={() => addNamedItem("subcategory")} onRename={(item) => renameItem("subcategories", item)} onArchive={(item) => archiveItem("subcategories", item)} />
-      </div>
-      <div className="tip-card"><span>i</span><p><b>Las subcategorías son reutilizables.</b> Por ejemplo, “Baño y cocina” puede usarse tanto en Materiales como en Mano de obra.</p></div>
+      <section className="manage-card category-catalog">
+        <div className="manage-head"><h2>Categorías de costos</h2><button className="secondary-button" onClick={() => addNamedItem("category")}>＋ Agregar categoría</button></div>
+        {categories.map((category) => {
+          const linked = subcategoriesFor(category.id);
+          return <div className="category-catalog-row" key={category.id}>
+            <div className="category-catalog-main">
+              <b>{category.name}</b>
+              <div className="subcategory-chips">
+                {linked.length ? linked.map((subcategory) => <button key={subcategory.id} title="Renombrar subcategoría" onClick={() => renameItem("subcategories", subcategory)}>{subcategory.name}</button>) : <span>Sin subcategorías</span>}
+              </div>
+            </div>
+            <div className="catalog-actions"><button onClick={() => addSubcategoryForCategory(category.id)}>＋ Subcategoría</button><button onClick={() => renameItem("categories", category)}>Renombrar</button><button className="danger" onClick={() => archiveItem("categories", category)}>Archivar</button></div>
+          </div>;
+        })}
+      </section>
+      <div className="tip-card"><span>i</span><p><b>“Mano de obra” y “Materiales” se comparten donde corresponde.</b> Si cambiás el nombre de una, se actualiza en todas esas categorías.</p></div>
     </div>
   );
 
@@ -482,13 +567,13 @@ export function ControlObraApp() {
       <nav className="bottom-nav">{nav.slice(0, 5).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>
       <button className="mobile-fab" aria-label="Ingresar gasto" onClick={() => setModal("expense")}>＋</button>
 
-      {modal === "expense" && <ExpenseModal data={data} rate={rate} expense={data.expenses.find((item) => item.id === selectedExpenseId)} addNamedItem={addNamedItem} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(expense) => {
+      {modal === "expense" && <ExpenseModal data={data} rate={rate} expense={data.expenses.find((item) => item.id === selectedExpenseId)} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(expense) => {
         setData((current) => ({ ...current, expenses: current.expenses.some((item) => item.id === expense.id) ? current.expenses.map((item) => item.id === expense.id ? expense : item) : [...current.expenses, expense] }));
         setModal(null); setSelectedExpenseId(""); notify("Gasto guardado");
       }} />}
       {modal === "payment" && <PaymentModal data={data} rate={rate} initialExpenseId={selectedExpenseId} remainingForExpense={remainingForExpense} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedExpenseId(""); notify("Pago registrado"); }} />}
-      {modal === "progress" && <ProgressModal categories={categories} subcategories={subcategories} close={() => setModal(null)} save={(item) => { setData((current) => ({ ...current, progress: [...current.progress.filter((entry) => !(entry.categoryId === item.categoryId && entry.subcategoryId === item.subcategoryId)), item] })); setModal(null); notify("Avance actualizado"); }} />}
-      {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
+      {modal === "progress" && <ProgressModal categories={categories} subcategories={subcategories} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(item) => { setData((current) => ({ ...current, progress: [...current.progress.filter((entry) => !(entry.categoryId === item.categoryId && entry.subcategoryId === item.subcategoryId)), item] })); setModal(null); notify("Avance actualizado"); }} />}
+      {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} close={() => setModal(null)} save={(nextRate, nextDate) => { setRate(nextRate); setRateDate(nextDate); setRateSource("Cotización ajustada manualmente"); setModal(null); notify("Cotización actualizada"); }} />}
       {toast && <div className="toast">✓ {toast}</div>}
@@ -508,15 +593,21 @@ function KindBadge({ kind }: { kind: ExpenseKind }) {
   return <span className={`kind-badge ${kind}`}>{kind === "approved" ? "Presupuesto aprobado" : kind === "additional" ? "Gasto adicional" : "Gasto"}</span>;
 }
 
-function ManageList({ title, items, onAdd, onRename, onArchive }: { title: string; items: Category[]; onAdd: () => void; onRename: (item: Category) => void; onArchive: (item: Category) => void }) {
-  return <section className="manage-card"><div className="manage-head"><h2>{title}</h2><button className="secondary-button" onClick={onAdd}>＋ Agregar</button></div>{items.map((item) => <div className="manage-row" key={item.id}><span>{item.name}</span><div><button onClick={() => onRename(item)}>Renombrar</button><button onClick={() => onArchive(item)}>Archivar</button></div></div>)}</section>;
-}
-
 function CategorySelect({ label, value, setValue, items, onNew }: { label: string; value: string; setValue: (value: string) => void; items: Category[]; onNew: () => string }) {
   return <label><span>{label}</span><select required value={value} onChange={(event) => { if (event.target.value === "__new") { const id = onNew(); if (id) setValue(id); } else setValue(event.target.value); }}><option value="">Elegir…</option>{items.filter((item) => !item.archived).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}<option value="__new">＋ Crear nueva</option></select></label>;
 }
 
-function ExpenseModal({ data, rate, expense, addNamedItem, close, save }: { data: AppState; rate: number; expense?: Expense; addNamedItem: (kind: "category" | "subcategory") => string; close: () => void; save: (expense: Expense) => void }) {
+function SubcategorySelect({ categoryId, value, setValue, categories, subcategories, onNew }: { categoryId: string; value: string; setValue: (value: string) => void; categories: Category[]; subcategories: Subcategory[]; onNew: () => string }) {
+  const available = linkedSubcategories(categoryId, categories, subcategories);
+  const hasOptions = available.length > 0;
+  return <label><span>Subcategoría</span><select required={hasOptions} disabled={!categoryId} value={value} onChange={(event) => { if (event.target.value === "__new") { const id = onNew(); if (id) setValue(id); } else setValue(event.target.value); }}>
+    <option value="">{!categoryId ? "Primero elegí una categoría" : hasOptions ? "Elegir…" : "No corresponde"}</option>
+    {available.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+    {categoryId && <option value="__new">＋ Crear nueva</option>}
+  </select></label>;
+}
+
+function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCategory, close, save }: { data: AppState; rate: number; expense?: Expense; addNamedItem: (kind: "category" | "subcategory") => string; addSubcategoryForCategory: (categoryId: string) => string; close: () => void; save: (expense: Expense) => void }) {
   const [date, setDate] = useState(expense?.date ?? today());
   const [description, setDescription] = useState(expense?.description ?? "");
   const [categoryId, setCategoryId] = useState(expense?.categoryId ?? "");
@@ -533,8 +624,8 @@ function ExpenseModal({ data, rate, expense, addNamedItem, close, save }: { data
   };
   return <Modal title={expense ? "Editar gasto" : "Ingresar gasto"} close={close} wide><form className="form-grid" onSubmit={submit}>
     <label className="span-2"><span>Descripción del gasto</span><input required value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
-    <CategorySelect label="Categoría" value={categoryId} setValue={setCategoryId} items={data.categories} onNew={() => addNamedItem("category")} />
-    <CategorySelect label="Subcategoría" value={subcategoryId} setValue={setSubcategoryId} items={data.subcategories} onNew={() => addNamedItem("subcategory")} />
+    <CategorySelect label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={data.categories} onNew={() => addNamedItem("category")} />
+    <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={data.categories} subcategories={data.subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />
     <label><span>Fecha</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
     <label><span>Responsable (opcional)</span><input value={responsible} onChange={(event) => setResponsible(event.target.value)} placeholder="Arquitecto, albañil…" /></label>
     <label><span>Monto</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></label>
@@ -565,22 +656,22 @@ function PaymentModal({ data, rate, initialExpenseId, remainingForExpense, close
   </form></Modal>;
 }
 
-function ProgressModal({ categories, subcategories, close, save }: { categories: Category[]; subcategories: Subcategory[]; close: () => void; save: (item: ProgressItem) => void }) {
+function ProgressModal({ categories, subcategories, addSubcategoryForCategory, close, save }: { categories: Category[]; subcategories: Subcategory[]; addSubcategoryForCategory: (categoryId: string) => string; close: () => void; save: (item: ProgressItem) => void }) {
   const [categoryId, setCategoryId] = useState(""); const [subcategoryId, setSubcategoryId] = useState(""); const [percent, setPercent] = useState(0);
   return <Modal title="Actualizar avance" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); save({ id: uid("prog"), categoryId, subcategoryId, percent }); }}>
-    <label><span>Categoría</span><select required value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Elegir…</option>{categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-    <label><span>Subcategoría</span><select required value={subcategoryId} onChange={(event) => setSubcategoryId(event.target.value)}><option value="">Elegir…</option>{subcategories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+    <label><span>Categoría</span><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setSubcategoryId(""); }}><option value="">Elegir…</option>{categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+    <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={categories} subcategories={subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />
     <div className="range-field span-2"><div><span>Porcentaje avanzado</span><strong>{percent}%</strong></div><input className="range" type="range" min="0" max="100" step="5" value={percent} onChange={(event) => setPercent(Number(event.target.value))} /></div>
     <FormActions close={close} label="Guardar avance" />
   </form></Modal>;
 }
 
-function BudgetModal({ categories, subcategories, addNamedItem, close, save }: { categories: Category[]; subcategories: Subcategory[]; addNamedItem: (kind: "category" | "subcategory") => string; close: () => void; save: (group: BudgetGroup) => void }) {
+function BudgetModal({ categories, subcategories, addNamedItem, addSubcategoryForCategory, close, save }: { categories: Category[]; subcategories: Subcategory[]; addNamedItem: (kind: "category" | "subcategory") => string; addSubcategoryForCategory: (categoryId: string) => string; close: () => void; save: (group: BudgetGroup) => void }) {
   const [name, setName] = useState(""); const [categoryId, setCategoryId] = useState(""); const [subcategoryId, setSubcategoryId] = useState("");
   return <Modal title="Nueva comparación" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); save({ id: uid("budget"), name: name.trim(), categoryId, subcategoryId, offers: [] }); }}>
     <label className="span-2"><span>¿Qué querés comparar?</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej: sanitarios para el baño" /></label>
-    <CategorySelect label="Categoría" value={categoryId} setValue={setCategoryId} items={categories} onNew={() => addNamedItem("category")} />
-    <CategorySelect label="Subcategoría" value={subcategoryId} setValue={setSubcategoryId} items={subcategories} onNew={() => addNamedItem("subcategory")} />
+    <CategorySelect label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={categories} onNew={() => addNamedItem("category")} />
+    <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={categories} subcategories={subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />
     <FormActions close={close} label="Crear y agregar oferta" />
   </form></Modal>;
 }

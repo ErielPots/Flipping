@@ -4,13 +4,22 @@ import { getDb } from "../../../db";
 import { appState } from "../../../db/schema";
 
 const INITIAL_STATE = {
+  catalogVersion: 2,
   categories: [
-    { id: "cat-materiales", name: "Materiales", archived: false },
-    { id: "cat-mano-obra", name: "Mano de obra", archived: false },
-    { id: "cat-electricista", name: "Electricista", archived: false },
+    { id: "cat-contratista", name: "Contratista", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales", "sub-adicionales"] },
+    { id: "cat-electricista", name: "Electricista", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+    { id: "cat-plomeria", name: "Plomería", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+    { id: "cat-pintor", name: "Pintor", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+    { id: "cat-colocador-pisos", name: "Colocador de pisos", archived: false, subcategoryIds: ["sub-mano-obra", "sub-materiales"] },
+    { id: "cat-zinguero", name: "Zinguero", archived: false, subcategoryIds: [] },
+    { id: "cat-muebles-cocina", name: "Muebles de cocina", archived: false, subcategoryIds: [] },
+    { id: "cat-placares", name: "Placares", archived: false, subcategoryIds: [] },
+    { id: "cat-ventanas", name: "Ventanas", archived: false, subcategoryIds: [] },
   ],
   subcategories: [
-    { id: "sub-bano-cocina", name: "Baño y cocina", archived: false },
+    { id: "sub-mano-obra", name: "Mano de obra", archived: false },
+    { id: "sub-materiales", name: "Materiales", archived: false },
+    { id: "sub-adicionales", name: "Adicionales", archived: false },
   ],
   expenses: [],
   payments: [],

@@ -217,6 +217,18 @@ button { cursor: pointer; }
 .manage-row div { display: flex; gap: 4px; }
 .manage-row button { border: 0; background: transparent; color: var(--blue); padding: 5px 7px; font-size: 11px; }
 .manage-row button:last-child { color: var(--red); }
+.category-catalog { width: 100%; }
+.category-catalog-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 18px; border-bottom: 1px solid #edf1ef; }
+.category-catalog-row:last-child { border-bottom: 0; }
+.category-catalog-main { min-width: 0; display: grid; gap: 9px; }
+.category-catalog-main > b { font-size: 15px; }
+.subcategory-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.subcategory-chips button, .subcategory-chips span { border: 0; border-radius: 99px; padding: 5px 9px; background: var(--blue-soft); color: var(--blue-dark); font-size: 10px; font-weight: 700; }
+.subcategory-chips button:hover { background: #d5e9f0; }
+.subcategory-chips span { background: #f1f4f2; color: var(--muted); font-weight: 600; }
+.catalog-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; }
+.catalog-actions button { border: 0; background: transparent; color: var(--blue); padding: 7px 8px; font-size: 11px; font-weight: 700; }
+.catalog-actions button.danger { color: var(--red); }
 .tip-card { display: flex; align-items: center; gap: 14px; background: var(--blue-soft); color: var(--blue-dark); padding: 16px 18px; border-radius: 15px; margin-top: 18px; }
 .tip-card > span { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid #acd0dd; border-radius: 50%; font-weight: 900; }
 .tip-card p { margin: 0; font-size: 13px; line-height: 1.5; }
@@ -308,6 +320,9 @@ button { cursor: pointer; }
   .budget-group { padding: 16px; }
   .budget-group-head { align-items: flex-start; display: grid; }
   .budget-head-actions { width: 100%; justify-content: space-between; }
+  .category-catalog-row { align-items: flex-start; display: grid; }
+  .catalog-actions { flex-wrap: wrap; }
+  .catalog-actions button { padding-left: 0; padding-right: 12px; }
   .form-grid { grid-template-columns: 1fr; padding: 8px 17px 20px; }
   .span-2 { grid-column: 1; }
   .modal-backdrop { padding: 8px; align-items: end; }
