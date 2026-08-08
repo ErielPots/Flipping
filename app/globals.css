@@ -194,6 +194,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .expense-sheet .date-cell { color: var(--muted); }
 .expense-sheet .paid-cell { color: var(--green); }
 .expense-sheet .balance-cell { color: var(--amber); font-weight: 700; }
+.cost-budget-comparison { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 14px 26px; margin-bottom: 16px; padding: 14px 17px; border: 1px solid #98c5af; border-left: 5px solid var(--green); border-radius: 13px; background: var(--green-soft); }
+.cost-budget-comparison.over { border-color: #dda69e; border-left-color: var(--red); background: var(--red-soft); }
+.cost-budget-comparison.unset { display: flex; justify-content: space-between; border-color: #aebbb4; border-left-color: #7d9187; background: #eef2f0; }
+.cost-budget-comparison div span { display: block; color: #526159; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
+.cost-budget-comparison div strong { display: block; margin-top: 5px; font-size: 15px; }
+.cost-budget-comparison p { margin: 0; color: #38644f; font-size: 12px; }
+.cost-budget-comparison.over p { color: #9d3939; }
 .expense-row-actions { display: flex; align-items: center; gap: 6px; }
 .row-payment-button { border: 1px solid #267a59; border-radius: 8px; background: #d9eee4; color: #206c4e; padding: 7px 10px; font-size: 11px; font-weight: 800; }
 .row-payment-button:hover { background: var(--green); color: white; }
@@ -269,15 +276,22 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investment-plan-grid article { min-height: 116px; padding: 16px; border: 1px solid #b7c3bd; border-radius: 13px; background: #e8edeb; }
 .investment-plan-grid article.automatic { border-color: #9fc3cf; background: var(--blue-soft); }
 .investment-plan-grid article.sale { border-color: #96c5af; background: var(--green-soft); }
+.investment-plan-grid article.budget-alert { border-color: #db9e95; background: var(--red-soft); }
 .investment-plan-grid span, .funding-summary-grid span { display: block; color: #526159; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
 .investment-plan-grid strong { display: block; margin-top: 12px; font-size: 20px; }
 .investment-plan-grid small { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; }
-.funding-summary-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 11px; margin-bottom: 22px; }
+.funding-summary-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 11px; margin-bottom: 16px; }
 .funding-summary-grid article { padding: 15px 17px; border: 1px solid #aebbb4; border-left: 4px solid var(--blue); border-radius: 12px; background: #f8faf9; }
 .funding-summary-grid article:nth-child(2) { border-left-color: var(--violet); }
 .funding-summary-grid article:nth-child(3) { border-left-color: var(--amber); }
 .funding-summary-grid article:nth-child(4) { border-left-color: var(--green); }
 .funding-summary-grid strong { display: block; margin-top: 8px; font-size: 17px; }
+.funding-summary-grid small { display: block; margin-top: 6px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.funding-summary-grid article.mismatch, .funding-summary-grid article.negative { border-color: #dda69e; border-left-color: var(--red); background: var(--red-soft); }
+.funding-summary-grid article.owner-profit { border-color: #98c5af; border-left-color: var(--green); background: var(--green-soft); }
+.investment-alert { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 13px 15px; border: 1px solid #98c5af; border-radius: 12px; background: var(--green-soft); color: #38644f; font-size: 11px; }
+.investment-alert.error { border-color: #dda69e; background: var(--red-soft); color: #9d3939; }
+.investment-alert .text-button { margin-left: auto; }
 .investor-sheet-wrap { overflow-x: auto; border: 1px solid #a7b5ae; border-radius: 16px; background: #f8faf9; box-shadow: var(--shadow); }
 .investor-sheet { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 12px; }
 .investor-sheet th { padding: 11px 13px; border-right: 1px solid #bac6c0; border-bottom: 1px solid #aab8b1; background: #cfd8d3; color: #31423a; text-align: left; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; }
@@ -286,6 +300,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investor-sheet tbody tr:nth-child(even) td { background: #edf1ef; }
 .investor-sheet .number-cell { text-align: right; white-space: nowrap; }
 .investor-sheet .profit-cell, .investor-sheet .annual-rate-cell { color: var(--green); font-weight: 800; }
+.annual-rate-value { display: grid; gap: 3px; }
+.annual-rate-value small { color: var(--muted); font-size: 9px; font-weight: 600; }
+.rate-warning { display: inline-block; max-width: 95px; color: var(--red); font-size: 9px; line-height: 1.25; white-space: normal; }
 .investor-contribution-list { display: grid; gap: 5px; min-width: 190px; }
 .investor-contribution-list button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 8px; border: 1px solid #b5c3bc; border-radius: 8px; background: #f8faf9; color: var(--ink); text-align: left; }
 .investor-contribution-list button:hover { border-color: var(--blue); background: var(--blue-soft); }
@@ -333,6 +350,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .form-grid input:focus, .form-grid select:focus { border-color: var(--blue); background: white; box-shadow: 0 0 0 3px rgba(23,107,135,.15); }
 .form-grid input[aria-invalid="true"] { border-color: var(--red); background: var(--red-soft); }
 .form-grid input:disabled, .form-grid select:disabled { border-color: #b8c2bd; background: #cdd5d1; color: #6d7b74; cursor: not-allowed; }
+.calculated-own-capital { display: grid; gap: 5px; padding: 14px; border: 1px solid #9fc3cf; border-radius: 11px; background: var(--blue-soft); }
+.calculated-own-capital > span { color: var(--blue-dark); text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
+.calculated-own-capital strong { color: var(--blue-dark); font-size: 19px; }
+.calculated-own-capital small { color: #52727c; }
+.manual-own-toggle { display: flex !important; grid-template-columns: none; align-items: center; gap: 9px !important; padding: 11px 13px; border: 1px solid #b6c2bc; border-radius: 10px; background: #e2e8e5; }
+.manual-own-toggle input { width: 18px !important; height: 18px !important; flex: 0 0 auto; accent-color: var(--blue); box-shadow: none !important; }
+.manual-own-toggle span { text-transform: none !important; letter-spacing: 0 !important; color: var(--ink) !important; font-size: 12px !important; }
+.form-alert { padding: 12px 14px; border: 1px solid #dda69e; border-radius: 10px; background: var(--red-soft); color: #9d3939; font-size: 11px; }
 .span-2 { grid-column: 1 / -1; }
 .currency-toggle { height: 45px; display: grid; grid-template-columns: 1fr 1fr; padding: 4px; background: #cdd6d1; border: 1px solid #98a79f; border-radius: 11px; }
 .currency-toggle button { border: 0; border-radius: 8px; background: transparent; color: #3f5047; font-size: 12px; font-weight: 800; }
@@ -442,5 +467,8 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .investment-plan-head .secondary-button { width: 100%; }
   .investment-plan-grid, .funding-summary-grid { grid-template-columns: 1fr; }
   .annual-rate-help { align-items: flex-start; display: grid; }
+  .cost-budget-comparison, .cost-budget-comparison.unset { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .investment-alert { align-items: flex-start; display: grid; }
+  .investment-alert .text-button { margin-left: 0; justify-self: start; }
   .bottom-nav button small { font-size: 8px; }
 }

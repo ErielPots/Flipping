@@ -56,8 +56,10 @@ type Investor = {
 type InvestmentPlan = {
   propertyValueUsd: number;
   ownCapitalUsd: number;
+  ownCapitalManual: boolean;
   remodelBudgetUsd: number;
   projectedSalePriceUsd: number;
+  purchaseDate: string;
   projectedSaleDate: string;
 };
 type AppState = {
@@ -77,8 +79,10 @@ type ModalName = "expense" | "payment" | "progress" | "budget" | "offer" | "rate
 const emptyInvestmentPlan: InvestmentPlan = {
   propertyValueUsd: 0,
   ownCapitalUsd: 0,
+  ownCapitalManual: false,
   remodelBudgetUsd: 0,
   projectedSalePriceUsd: 0,
+  purchaseDate: "",
   projectedSaleDate: "",
 };
 
@@ -114,9 +118,14 @@ const initialState: AppState = {
 
 function normalizeState(candidate: AppState | undefined): AppState {
   if (!candidate?.categories || !candidate?.subcategories) return initialState;
+  const savedPlan = candidate.investmentPlan;
   const investmentState = {
     investors: Array.isArray(candidate.investors) ? candidate.investors : [],
-    investmentPlan: { ...emptyInvestmentPlan, ...(candidate.investmentPlan ?? {}) },
+    investmentPlan: {
+      ...emptyInvestmentPlan,
+      ...(savedPlan ?? {}),
+      ownCapitalManual: savedPlan?.ownCapitalManual ?? Boolean(savedPlan?.ownCapitalUsd),
+    },
   };
   if ((candidate.catalogVersion ?? 0) >= 2) return { ...candidate, ...investmentState };
 
@@ -187,13 +196,14 @@ const percent = (value: number) => `${new Intl.NumberFormat("es-AR", { maximumFr
 const investorMetrics = (investor: Investor, projectedSaleDate: string) => {
   const capital = investor.contributions.reduce((sum, item) => sum + item.amount, 0);
   const totalReturnPercent = capital ? (investor.profitUsd / capital) * 100 : 0;
-  if (!capital || !projectedSaleDate) return { capital, totalReturnPercent, annualRate: null as number | null };
+  if (!capital) return { capital, totalReturnPercent, annualRate: null as number | null, termDays: null as number | null, annualRateStatus: "Sin capital" };
+  if (!projectedSaleDate) return { capital, totalReturnPercent, annualRate: null as number | null, termDays: null as number | null, annualRateStatus: "Falta fecha de venta" };
   const weightedContributionTime = investor.contributions.reduce((sum, item) => sum + new Date(`${item.date}T12:00:00`).getTime() * item.amount, 0) / capital;
   const saleTime = new Date(`${projectedSaleDate}T12:00:00`).getTime();
   const days = (saleTime - weightedContributionTime) / 86_400_000;
-  if (!Number.isFinite(days) || days <= 0) return { capital, totalReturnPercent, annualRate: null as number | null };
-  const annualRate = (Math.pow((capital + investor.profitUsd) / capital, 365 / days) - 1) * 100;
-  return { capital, totalReturnPercent, annualRate: Number.isFinite(annualRate) ? annualRate : null };
+  if (!Number.isFinite(days) || days <= 0) return { capital, totalReturnPercent, annualRate: null as number | null, termDays: null as number | null, annualRateStatus: "Revisar fechas" };
+  const annualRate = totalReturnPercent * (365 / days);
+  return { capital, totalReturnPercent, annualRate: Number.isFinite(annualRate) ? annualRate : null, termDays: days, annualRateStatus: "Calculada" };
 };
 const linkedSubcategories = (categoryId: string, categories: Category[], subcategories: Subcategory[]) => {
   const category = categories.find((item) => item.id === categoryId);
@@ -353,6 +363,7 @@ export function ControlObraApp() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+  const investorCapitalTotal = data.investors.reduce((sum, investor) => sum + investor.contributions.reduce((contributionSum, contribution) => contributionSum + contribution.amount, 0), 0);
 
   const notify = (message: string) => {
     setToast(message);
@@ -464,9 +475,16 @@ export function ControlObraApp() {
       .filter((expense) => expenseCategoryFilter === "all" || expense.categoryId === expenseCategoryFilter)
       .slice()
       .sort((a, b) => b.date.localeCompare(a.date));
+    const remodelBudget = data.investmentPlan.remodelBudgetUsd;
+    const remodelDifference = totals.committedUsd - remodelBudget;
 
     return <div className="page-content">
       <PageHeading eyebrow="Movimientos" title="Gastos" copy="Tocá cualquier fila para registrar un pago sin salir de esta pantalla." action="Ingresar gasto" onAction={() => setModal("expense")} />
+      {remodelBudget > 0 ? <section className={`cost-budget-comparison ${remodelDifference > 0.005 ? "over" : "under"}`}>
+        <div><span>Presupuesto proyectado de remodelación</span><strong>{money(remodelBudget, "USD")}</strong></div>
+        <div><span>Costos reales registrados</span><strong>{money(totals.committedUsd, "USD")}</strong></div>
+        <p>{remodelDifference > 0.005 ? <>⚠ Gastaste <b>{money(remodelDifference, "USD")} más</b> que lo proyectado.</> : <>✓ Llevás <b>{money(Math.abs(remodelDifference), "USD")} menos</b> que lo proyectado.</>}</p>
+      </section> : <section className="cost-budget-comparison unset"><p>Definí el presupuesto proyectado de remodelación en Inversores para compararlo con los gastos reales.</p><button className="text-button" onClick={() => setView("investors")}>Ir a Inversores →</button></section>}
       <div className="expense-category-filters" aria-label="Filtrar gastos por categoría">
         <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
         {categories.map((category) => {
@@ -604,27 +622,36 @@ export function ControlObraApp() {
 
   const renderInvestors = () => {
     const plan = data.investmentPlan;
-    const investorCapital = data.investors.reduce((sum, investor) => sum + investorMetrics(investor, plan.projectedSaleDate).capital, 0);
+    const investorCapital = investorCapitalTotal;
     const investorProfit = data.investors.reduce((sum, investor) => sum + investor.profitUsd, 0);
+    const calculatedOwnCapital = Math.max(0, plan.propertyValueUsd - investorCapital);
+    const effectiveOwnCapital = plan.ownCapitalManual ? plan.ownCapitalUsd : calculatedOwnCapital;
+    const ownCapitalDifference = effectiveOwnCapital - calculatedOwnCapital;
+    const ownCapitalMismatch = plan.ownCapitalManual && Math.abs(ownCapitalDifference) > 0.005;
+    const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
+    const ownerProfit = plan.projectedSalePriceUsd > 0 ? plan.projectedSalePriceUsd - investorCapital - investorProfit - effectiveOwnCapital - totals.committedUsd : 0;
     return <div className="page-content">
       <PageHeading eyebrow="Financiamiento" title="Inversores" copy="Registrá la propiedad, los aportes recibidos y la rentabilidad estimada de cada inversor." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
 
       <section className="investment-plan-panel">
         <div className="investment-plan-head"><div><span className="eyebrow">Proyecto en dólares</span><h2>Propiedad y proyección de venta</h2></div><button className="secondary-button" onClick={() => setModal("investmentPlan")}>Editar valores</button></div>
         <div className="investment-plan-grid">
-          <article><span>Valor de la propiedad</span><strong>{money(plan.propertyValueUsd, "USD")}</strong><small>Precio de compra</small></article>
-          <article><span>Presupuesto de remodelación</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>Estimación cargada</small></article>
+          <article><span>Valor de la propiedad</span><strong>{money(plan.propertyValueUsd, "USD")}</strong><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"}</small></article>
+          <article className={plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}><span>Presupuesto proyectado de remodelación</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : `${money(Math.abs(remodelDifference), "USD")} por debajo`}</small></article>
           <article className="automatic"><span>Gastos registrados</span><strong>{money(totals.committedUsd, "USD")}</strong><small>Se calcula desde Gastos</small></article>
           <article className="sale"><span>Precio proyectado de venta</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
         </div>
       </section>
 
       <section className="funding-summary-grid">
-        <article><span>Aporte propio</span><strong>{money(plan.ownCapitalUsd, "USD")}</strong></article>
+        <article className={ownCapitalMismatch ? "mismatch" : ""}><span>Aporte propio</span><strong>{money(effectiveOwnCapital, "USD")}</strong><small>{plan.ownCapitalManual ? "Valor informado manualmente" : "Calculado automáticamente"}</small></article>
         <article><span>Capital de inversores</span><strong>{money(investorCapital, "USD")}</strong></article>
         <article><span>Ganancia pactada</span><strong>{money(investorProfit, "USD")}</strong></article>
         <article><span>Total a devolver</span><strong>{money(investorCapital + investorProfit, "USD")}</strong></article>
+        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada del aporte propio</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Después de gastos y devolución a inversores" : "Falta cargar el precio de venta"}</small></article>
       </section>
+      {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según el valor de la propiedad menos el capital de inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
+      {plan.remodelBudgetUsd > 0 && <div className={`investment-alert ${remodelDifference > 0.005 ? "error" : "success"}`}><b>{remodelDifference > 0.005 ? "⚠ Presupuesto de remodelación superado" : "✓ Gastos dentro de lo proyectado"}</b><span>{remodelDifference > 0.005 ? `Gastaste ${money(remodelDifference, "USD")} más que lo proyectado.` : `Llevás ${money(Math.abs(remodelDifference), "USD")} menos que lo proyectado.`}</span></div>}
 
       {data.investors.length === 0 ? <EmptyState icon="↗" title="Todavía no hay inversores" copy="Ingresá el nombre, el primer aporte recibido y la ganancia que le vas a pagar." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} /> : <div className="investor-sheet-wrap">
         <table className="investor-sheet">
@@ -638,12 +665,12 @@ export function ControlObraApp() {
               <td className="number-cell profit-cell">{money(investor.profitUsd, "USD")}</td>
               <td className="number-cell"><b>{money(metrics.capital + investor.profitUsd, "USD")}</b></td>
               <td className="number-cell">{percent(metrics.totalReturnPercent)}</td>
-              <td className="number-cell annual-rate-cell">{metrics.annualRate === null ? "—" : percent(metrics.annualRate)}</td>
+              <td className="number-cell annual-rate-cell">{metrics.annualRate === null ? <small className="rate-warning">{metrics.annualRateStatus}</small> : <div className="annual-rate-value"><b>{percent(metrics.annualRate)}</b><small>{Math.round(metrics.termDays ?? 0)} días</small></div>}</td>
               <td><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button></div></td>
             </tr>;
           })}</tbody>
         </table>
-        <div className="annual-rate-help"><b>¿Cómo se calcula la tasa anual?</b><span>Usa la ganancia pactada, la fecha proyectada de venta y la fecha promedio ponderada de todos los aportes del inversor.</span></div>
+        <div className="annual-rate-help"><b>¿Cómo se calcula la tasa anual?</b><span>Ganancia % × 365 ÷ días hasta la venta. Si hay varios aportes, usa una fecha promedio ponderada por cada monto.</span></div>
       </div>}
     </div>;
   };
@@ -731,7 +758,7 @@ export function ControlObraApp() {
       {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} close={() => setModal(null)} save={(nextRate, nextDate) => { setRate(nextRate); setRateDate(nextDate); setRateSource("Cotización ajustada manualmente"); setModal(null); notify("Cotización actualizada"); }} />}
-      {modal === "investmentPlan" && <InvestmentPlanModal plan={data.investmentPlan} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
+      {modal === "investmentPlan" && <InvestmentPlanModal plan={data.investmentPlan} investorCapitalUsd={investorCapitalTotal} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
       {modal === "investor" && <InvestorModal investor={data.investors.find((item) => item.id === selectedInvestorId)} close={() => { setModal(null); setSelectedInvestorId(""); }} save={(investor) => {
         setData((current) => ({ ...current, investors: current.investors.some((item) => item.id === investor.id) ? current.investors.map((item) => item.id === investor.id ? investor : item) : [...current.investors, investor] }));
         setModal(null); setSelectedInvestorId(""); notify("Inversor guardado");
@@ -886,19 +913,27 @@ function OfferModal({ rate, group, close, save }: { rate: number; group?: Budget
   </form></Modal>;
 }
 
-function InvestmentPlanModal({ plan, close, save }: { plan: InvestmentPlan; close: () => void; save: (plan: InvestmentPlan) => void }) {
+function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: InvestmentPlan; investorCapitalUsd: number; close: () => void; save: (plan: InvestmentPlan) => void }) {
   const [propertyValue, setPropertyValue] = useState(plan.propertyValueUsd ? plan.propertyValueUsd.toString() : "");
   const [ownCapital, setOwnCapital] = useState(plan.ownCapitalUsd ? plan.ownCapitalUsd.toString() : "");
+  const [ownCapitalManual, setOwnCapitalManual] = useState(plan.ownCapitalManual);
   const [remodelBudget, setRemodelBudget] = useState(plan.remodelBudgetUsd ? plan.remodelBudgetUsd.toString() : "");
   const [salePrice, setSalePrice] = useState(plan.projectedSalePriceUsd ? plan.projectedSalePriceUsd.toString() : "");
+  const [purchaseDate, setPurchaseDate] = useState(plan.purchaseDate);
   const [saleDate, setSaleDate] = useState(plan.projectedSaleDate);
+  const calculatedOwnCapital = Math.max(0, (Number(propertyValue) || 0) - investorCapitalUsd);
+  const manualDifference = (Number(ownCapital) || 0) - calculatedOwnCapital;
   return <Modal title="Datos de la inversión" close={close} wide><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
-    save({ propertyValueUsd: Number(propertyValue) || 0, ownCapitalUsd: Number(ownCapital) || 0, remodelBudgetUsd: Number(remodelBudget) || 0, projectedSalePriceUsd: Number(salePrice) || 0, projectedSaleDate: saleDate });
+    save({ propertyValueUsd: Number(propertyValue) || 0, ownCapitalUsd: ownCapitalManual ? Number(ownCapital) || 0 : calculatedOwnCapital, ownCapitalManual, remodelBudgetUsd: Number(remodelBudget) || 0, projectedSalePriceUsd: Number(salePrice) || 0, purchaseDate, projectedSaleDate: saleDate });
   }}>
     <label><span>Valor de la propiedad (USD)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label>
-    <label><span>Aporte propio (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>
-    <label><span>Presupuesto remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>
+    <label><span>Fecha de compra de la propiedad</span><input type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} /></label>
+    <div className="calculated-own-capital span-2"><span>Aporte propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Valor de la propiedad menos {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
+    <label className="manual-own-toggle span-2"><input type="checkbox" checked={ownCapitalManual} onChange={(event) => { setOwnCapitalManual(event.target.checked); if (event.target.checked && !ownCapital) setOwnCapital(calculatedOwnCapital.toString()); }} /><span>Ingresar un aporte propio diferente al cálculo automático</span></label>
+    {ownCapitalManual && <label className="span-2"><span>Aporte propio informado (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>}
+    {ownCapitalManual && Math.abs(manualDifference) > 0.005 && <div className="form-alert error span-2">⚠ No coincide con el cálculo automático. Hay una diferencia de <b>{money(Math.abs(manualDifference), "USD")}</b>.</div>}
+    <label><span>Presupuesto proyectado de remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>
     <label><span>Precio proyectado de venta (USD)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="USD" /></label>
     <label className="span-2"><span>Fecha proyectada de venta</span><input type="date" value={saleDate} onChange={(event) => setSaleDate(event.target.value)} /></label>
     <div className="source-note span-2"><span>Dato automático</span><b>Los gastos reales de remodelación se calculan desde la pantalla Gastos.</b></div>
