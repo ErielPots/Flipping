@@ -187,10 +187,36 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .expense-sheet tbody tr:nth-child(even) td { background: #edf1ef; }
 .expense-sheet tbody tr:last-child td { border-bottom: 0; }
 .expense-sheet tbody tr:hover td { background: #dfe9e4; }
+.expense-sheet .expense-data-row { cursor: pointer; transition: .16s ease; }
+.expense-sheet .expense-data-row:focus-visible { outline: 3px solid rgba(23,107,135,.3); outline-offset: -3px; }
+.expense-sheet .expense-data-row.expanded td { background: #d8e7e0; border-bottom-color: #8fa49a; }
 .expense-sheet .number-cell { text-align: right; }
 .expense-sheet .date-cell { color: var(--muted); }
 .expense-sheet .paid-cell { color: var(--green); }
 .expense-sheet .balance-cell { color: var(--amber); font-weight: 700; }
+.expense-row-actions { display: flex; align-items: center; gap: 6px; }
+.row-payment-button { border: 1px solid #267a59; border-radius: 8px; background: #d9eee4; color: #206c4e; padding: 7px 10px; font-size: 11px; font-weight: 800; }
+.row-payment-button:hover { background: var(--green); color: white; }
+.expense-sheet .expense-payment-row td { padding: 0; background: #dfe7e3; border-right: 0; border-bottom: 2px solid #93a79d; white-space: normal; }
+.expense-sheet .expense-payment-row:hover td { background: #dfe7e3; }
+.inline-payment-panel { padding: 19px 22px 22px; }
+.inline-payment-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.inline-payment-head > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
+.inline-payment-head span { color: var(--green); text-transform: uppercase; letter-spacing: .06em; font-size: 9px; font-weight: 900; }
+.inline-payment-head strong { font-size: 15px; }
+.inline-payment-head small { color: #526159; font-size: 11px; }
+.inline-payment-form { display: grid; grid-template-columns: minmax(150px,.65fr) minmax(360px,1.5fr) minmax(220px,1fr) auto; align-items: end; gap: 12px; }
+.inline-payment-form > label { display: grid; gap: 7px; }
+.inline-payment-form label > span, .inline-payment-form .amount-field > span { color: #526159; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
+.inline-payment-form > label input { width: 100%; height: 45px; border: 1px solid #879a90; border-radius: 10px; background: #f8faf9; color: var(--ink); padding: 0 11px; }
+.inline-payment-form > label input:focus { border-color: var(--blue); background: white; }
+.inline-payment-submit { height: 45px; white-space: nowrap; }
+.inline-payment-note { grid-column: 1 / -1; padding: 10px 12px; border: 1px solid #aacbd6; border-radius: 9px; background: var(--blue-soft); color: var(--blue-dark); font-size: 11px; }
+.inline-payment-note.error { border-color: #e0aaa2; background: var(--red-soft); color: var(--red); }
+.inline-payment-complete { display: flex; align-items: center; gap: 11px; padding: 14px; border: 1px solid #9ccab5; border-radius: 11px; background: var(--green-soft); color: var(--green); }
+.inline-payment-complete > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: white; font-weight: 900; }
+.inline-payment-complete b, .inline-payment-complete small { display: block; }
+.inline-payment-complete small { margin-top: 3px; color: #547065; }
 .filtered-empty { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 10px; background: #f5f7f6; border: 2px dashed #aab7b0; border-radius: 16px; color: var(--muted); }
 
 .payment-list, .progress-grid, .offers-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, ReactNode, useEffect, useMemo, useState } from "react";
 
 type Currency = "ARS" | "USD";
 type Category = { id: string; name: string; archived: boolean; subcategoryIds?: string[] };
@@ -191,6 +191,7 @@ export function ControlObraApp() {
   const [view, setView] = useState<View>("home");
   const [modal, setModal] = useState<ModalName>(null);
   const [selectedExpenseId, setSelectedExpenseId] = useState<string>("");
+  const [expandedExpenseId, setExpandedExpenseId] = useState<string>("");
   const [selectedBudgetId, setSelectedBudgetId] = useState<string>("");
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<string>("all");
   const [rate, setRate] = useState(1500);
@@ -391,7 +392,7 @@ export function ControlObraApp() {
       .sort((a, b) => b.date.localeCompare(a.date));
 
     return <div className="page-content">
-      <PageHeading eyebrow="Movimientos" title="Gastos" copy="Una grilla simple con todos los gastos de la obra." action="Ingresar gasto" onAction={() => setModal("expense")} />
+      <PageHeading eyebrow="Movimientos" title="Gastos" copy="Tocá cualquier fila para registrar un pago sin salir de esta pantalla." action="Ingresar gasto" onAction={() => setModal("expense")} />
       <div className="expense-category-filters" aria-label="Filtrar gastos por categoría">
         <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
         {categories.map((category) => {
@@ -402,11 +403,24 @@ export function ControlObraApp() {
       {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay gastos" copy="Ingresá el primer gasto o aprobá un presupuesto para comenzar." action="Ingresar gasto" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay gastos en esta categoría.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
         <div className="expense-sheet-wrap">
           <table className="expense-sheet">
-            <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Descripción</th><th>Responsable</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Saldo</th><th aria-label="Acciones" /></tr></thead>
+            <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Descripción</th><th>Responsable</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Saldo</th><th>Acciones</th></tr></thead>
             <tbody>{filteredExpenses.map((expense) => {
               const paid = paymentForExpense(expense);
               const remaining = remainingForExpense(expense);
-              return <tr key={expense.id}>
+              const expanded = expandedExpenseId === expense.id;
+              const togglePayment = () => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id);
+              return <Fragment key={expense.id}><tr
+                className={`expense-data-row ${expanded ? "expanded" : ""}`}
+                tabIndex={0}
+                aria-expanded={expanded}
+                onClick={togglePayment}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    togglePayment();
+                  }
+                }}
+              >
                 <td className="date-cell">{shortDate(expense.date)}</td>
                 <td><b>{categoryName(expense.categoryId)}</b></td>
                 <td>{subcategoryName(expense.subcategoryId) || "—"}</td>
@@ -415,8 +429,25 @@ export function ControlObraApp() {
                 <td className="number-cell"><b>{money(expense.amount, expense.currency)}</b></td>
                 <td className="number-cell paid-cell">{money(paid, expense.currency)}</td>
                 <td className="number-cell balance-cell">{money(remaining, expense.currency)}</td>
-                <td><button className="mini-button" onClick={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}>Editar</button></td>
-              </tr>;
+                <td><div className="expense-row-actions">
+                  <button className="row-payment-button" type="button" onClick={(event) => { event.stopPropagation(); togglePayment(); }}>{expanded ? "Cerrar" : remaining > 0.005 ? "Pagar" : "Ver"}</button>
+                  <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); setSelectedExpenseId(expense.id); setModal("expense"); }}>Editar</button>
+                </div></td>
+              </tr>
+              {expanded && <tr className="expense-payment-row"><td colSpan={9}>
+                <InlinePaymentForm
+                  expense={expense}
+                  rate={rate}
+                  remaining={remaining}
+                  close={() => setExpandedExpenseId("")}
+                  save={(payment) => {
+                    setData((current) => ({ ...current, payments: [...current.payments, payment] }));
+                    setExpandedExpenseId("");
+                    notify("Pago registrado");
+                  }}
+                />
+              </td></tr>}
+              </Fragment>;
             })}</tbody>
           </table>
         </div>
@@ -633,6 +664,42 @@ function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCate
     {amount && <div className="conversion-note span-2">Equivale a <b>{currency === "ARS" ? money(Number(amount) / selectedRate, "USD") : money(Number(amount) * selectedRate, "ARS")}</b> usando dólar {money(selectedRate, "ARS")}.</div>}
     <FormActions close={close} label={expense ? "Guardar cambios" : "Guardar gasto"} />
   </form></Modal>;
+}
+
+function InlinePaymentForm({ expense, rate, remaining, close, save }: { expense: Expense; rate: number; remaining: number; close: () => void; save: (payment: Payment) => void }) {
+  const [date, setDate] = useState(today());
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState<Currency>(expense.currency);
+  const maxAmount = currency === expense.currency
+    ? remaining
+    : expense.currency === "ARS"
+      ? remaining / rate
+      : remaining * rate;
+  const debitAmount = expense.currency === currency
+    ? Number(amount)
+    : expense.currency === "ARS"
+      ? Number(amount) * rate
+      : Number(amount) / rate;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!amount || Number(amount) <= 0 || Number(amount) > maxAmount + 0.005) return;
+    save({ id: uid("pay"), expenseId: expense.id, date, description: description.trim(), amount: Number(amount), currency, rate });
+  };
+
+  return <div className="inline-payment-panel">
+    <div className="inline-payment-head">
+      <div><span>Pago para este gasto</span><strong>{expense.description || "Gasto sin descripción"}</strong><small>Saldo pendiente: {money(remaining, expense.currency)}</small></div>
+      <button type="button" className="icon-button" onClick={close} aria-label="Cerrar pago">×</button>
+    </div>
+    {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este gasto ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : <form className="inline-payment-form" onSubmit={submit}>
+      <label><span>Fecha del pago</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+      <div className="amount-field"><span>Monto pagado</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={(value) => { setCurrency(value); setAmount(""); }} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><input aria-label={`Monto pagado en ${currency}`} required min="0.01" max={maxAmount} step="0.01" inputMode="decimal" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder={currency} /></label></div></div>
+      <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
+      <button className="primary-button inline-payment-submit" type="submit">Guardar pago</button>
+      {amount && Number(amount) > 0 && <div className={`inline-payment-note ${Number(amount) > maxAmount + 0.005 ? "error" : ""}`}>{Number(amount) > maxAmount + 0.005 ? <>El monto supera el saldo. El máximo es <b>{money(maxAmount, currency)}</b>.</> : <>Se descontarán <b>{money(debitAmount, expense.currency)}</b> del saldo.</>}</div>}
+    </form>}
+  </div>;
 }
 
 function PaymentModal({ data, rate, initialExpenseId, remainingForExpense, close, save }: { data: AppState; rate: number; initialExpenseId: string; remainingForExpense: (expense: Expense) => number; close: () => void; save: (payment: Payment) => void }) {
