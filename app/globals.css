@@ -302,22 +302,31 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investor-sheet .investor-data-row:hover td { background: #dfe9e4; }
 .investor-sheet .investor-data-row:focus-visible { outline: 3px solid rgba(23,107,135,.3); outline-offset: -3px; }
 .investor-sheet .investor-data-row.expanded td { background: #d8e7e0; border-bottom-color: #8fa49a; }
+.investor-sheet .own-capital-row td, .investor-sheet .own-capital-row:hover td, .investor-sheet .own-capital-row.expanded td { background: #505b55; color: white; border-color: #707b75; }
+.investor-sheet .own-capital-row td:first-child { border-left: 5px solid #26312c; }
+.investor-sheet .own-capital-row td > small { display: block; margin-top: 4px; color: #d8dfdb; font-size: 9px; }
+.investor-sheet .own-capital-row .profit-cell, .investor-sheet .own-capital-row .annual-rate-cell, .investor-sheet .own-capital-row .annual-rate-value small, .investor-sheet .own-capital-row .rate-warning { color: white; }
 .annual-rate-value { display: grid; gap: 3px; }
 .annual-rate-value small { color: var(--muted); font-size: 9px; font-weight: 600; }
 .rate-warning { display: inline-block; max-width: 95px; color: var(--red); font-size: 9px; line-height: 1.25; white-space: normal; }
 .investor-contribution-cell { display: grid; gap: 5px; min-width: 90px; }
-.investor-contribution-cell button { width: 100%; min-height: 31px; padding: 6px 8px; border: 1px solid #b5c3bc; border-radius: 8px; background: #f8faf9; color: var(--ink); text-align: left; white-space: nowrap; }
-.investor-contribution-cell.amount button { text-align: right; }
-.investor-contribution-cell button:hover { border-color: var(--blue); background: var(--blue-soft); }
+.investor-contribution-cell > span { min-height: 28px; display: flex; align-items: center; padding: 4px 0; white-space: nowrap; }
+.investor-contribution-cell.amount > span { justify-content: flex-end; }
 .investor-actions-row td { padding: 0 !important; border-right: 0 !important; background: #dfe7e3 !important; }
 .investor-actions-row > td > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; }
 .investor-actions-row span { color: var(--muted); font-size: 11px; }
+.investor-expanded-actions { align-items: flex-start !important; }
+.contribution-edit-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.own-capital-actions-row td { background: #cbd3cf !important; }
 .investor-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .annual-rate-help { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-top: 1px solid #b8c5be; background: #e4eae7; color: #526159; font-size: 11px; }
 .annual-rate-help b { color: var(--ink); }
 .investor-mobile-list { gap: 10px; }
 .investor-mobile-card { overflow: hidden; border: 1px solid #aebbb4; border-radius: 14px; background: #f8faf9; box-shadow: 0 6px 16px rgba(30,54,44,.08); }
 .investor-mobile-card.expanded { border-color: #7f998c; }
+.investor-mobile-card.own-capital-card { border-color: #3e4943; background: #505b55; }
+.own-capital-card .investor-mobile-summary, .own-capital-card .investor-mobile-summary > span b { color: white; }
+.own-capital-card .investor-mobile-summary small, .own-capital-card .investor-mobile-summary > span { color: #d8dfdb; }
 .investor-mobile-summary { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 11px; padding: 14px; border: 0; background: transparent; color: var(--ink); text-align: left; }
 .investor-mobile-summary > div { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .investor-mobile-summary > div b { font-size: 16px; }
@@ -328,8 +337,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investor-mobile-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
 .investor-mobile-contributions { display: grid; gap: 6px; }
 .investor-mobile-contributions > span { color: #526159; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
-.investor-mobile-contributions button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid #adbbb4; border-radius: 9px; background: #f8faf9; color: var(--ink); }
-.investor-mobile-contributions button span { color: var(--muted); font-size: 10px; }
+.contribution-mobile-data { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid #c7d0cb; color: var(--ink); }
+.contribution-mobile-data span { color: var(--muted); font-size: 10px; }
+.contribution-mobile-data b { text-align: right; }
 .contribution-mobile-head { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 10px; }
 .contribution-mobile-head span:last-child { text-align: right; }
 .investor-mobile-actions { display: flex; gap: 7px; }

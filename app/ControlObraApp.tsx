@@ -700,6 +700,12 @@ export function ControlObraApp() {
     const ownCapitalDifference = effectiveOwnCapital - calculatedOwnCapital;
     const ownCapitalMismatch = plan.ownCapitalManual && Math.abs(ownCapitalDifference) > 0.005;
     const ownerProfit = plan.projectedSalePriceUsd > 0 ? plan.projectedSalePriceUsd - investorCapital - investorProfit - effectiveOwnCapital : 0;
+    const ownReturnPercent = effectiveOwnCapital ? (ownerProfit / effectiveOwnCapital) * 100 : 0;
+    const ownTermDays = plan.purchaseDate && plan.projectedSaleDate
+      ? (new Date(`${plan.projectedSaleDate}T12:00:00`).getTime() - new Date(`${plan.purchaseDate}T12:00:00`).getTime()) / 86_400_000
+      : null;
+    const ownAnnualRate = ownTermDays && ownTermDays > 0 ? ownReturnPercent * (365 / ownTermDays) : null;
+    const ownRateStatus = !effectiveOwnCapital ? "Sin aporte" : !plan.projectedSaleDate ? "Falta fecha de venta" : !plan.purchaseDate ? "Falta fecha de compra" : !ownTermDays || ownTermDays <= 0 ? "Revisar fechas" : "Calculada";
     return <div className="page-content">
       <PageHeading eyebrow="Financiamiento" title="Inversores" copy="Aportes y rendimiento." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
 
@@ -712,47 +718,71 @@ export function ControlObraApp() {
       </section>
       {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según propiedad + remodelación proyectada − inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
 
-      {data.investors.length === 0 ? <EmptyState icon="↗" title="Todavía no hay inversores" copy="Ingresá el nombre, el primer aporte recibido y la ganancia que le vas a pagar." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} /> : <><div className="investor-sheet-wrap investor-desktop-view">
+      <><div className="investor-sheet-wrap investor-desktop-view">
         <table className="investor-sheet">
-          <thead><tr><th>Inversor</th><th>Fecha</th><th className="number-cell">Monto</th><th className="number-cell">Capital en USD</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver en USD</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual simple</th></tr></thead>
-          <tbody>{data.investors.map((investor) => {
+          <thead><tr><th>Inversor</th><th>Fecha</th><th className="number-cell">Monto</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver en USD</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual simple</th></tr></thead>
+          <tbody>
+            <Fragment><tr className={`investor-data-row own-capital-row ${expandedInvestorId === "own-capital" ? "expanded" : ""}`} tabIndex={0} aria-expanded={expandedInvestorId === "own-capital"} onClick={() => setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital")} onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital"); }
+            }}>
+              <td><b>Aporte propio</b><small>Fila fija</small></td>
+              <td>{plan.purchaseDate ? shortDate(plan.purchaseDate) : "—"}</td>
+              <td className="number-cell"><b>{money(effectiveOwnCapital, "USD")}</b></td>
+              <td className="number-cell profit-cell"><b>{money(ownerProfit, "USD")}</b></td>
+              <td className="number-cell"><b>{money(effectiveOwnCapital + ownerProfit, "USD")}</b></td>
+              <td className="number-cell">{percent(ownReturnPercent)}</td>
+              <td className="number-cell annual-rate-cell">{ownAnnualRate === null ? <small className="rate-warning">{ownRateStatus}</small> : <div className="annual-rate-value"><b>{percent(ownAnnualRate)}</b><small>{Math.round(ownTermDays ?? 0)} días</small></div>}</td>
+            </tr>{expandedInvestorId === "own-capital" && <tr className="investor-actions-row own-capital-actions-row"><td colSpan={7}><div><span>Se calcula con propiedad + remodelación proyectada − aportes de inversores.</span><div className="investor-actions"><button className="mini-button" onClick={() => setModal("investmentPlan")}>Editar valores de la inversión</button></div></div></td></tr>}</Fragment>
+            {data.investors.map((investor) => {
             const metrics = investorMetrics(investor, plan.projectedSaleDate);
             const expanded = expandedInvestorId === investor.id;
             const contributions = investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
             const toggleInvestor = () => setExpandedInvestorId((current) => current === investor.id ? "" : investor.id);
-            const editContribution = (contribution: InvestorContribution) => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); };
             return <Fragment key={investor.id}><tr className={`investor-data-row ${expanded ? "expanded" : ""}`} tabIndex={0} aria-expanded={expanded} onClick={toggleInvestor} onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleInvestor(); }
             }}>
               <td><b>{investor.name}</b></td>
-              <td><div className="investor-contribution-cell">{contributions.length === 0 ? <small>Sin fecha</small> : contributions.map((contribution) => <button type="button" key={contribution.id} title="Editar aporte" onClick={(event) => { event.stopPropagation(); editContribution(contribution); }}>{shortDate(contribution.date)}</button>)}</div></td>
-              <td className="number-cell"><div className="investor-contribution-cell amount">{contributions.length === 0 ? <small>Sin monto</small> : contributions.map((contribution) => <button type="button" key={contribution.id} title="Editar aporte" onClick={(event) => { event.stopPropagation(); editContribution(contribution); }}><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</div></td>
-              <td className="number-cell"><b>{money(metrics.capital, "USD")}</b></td>
+              <td><div className="investor-contribution-cell">{contributions.length === 0 ? <small>Sin fecha</small> : contributions.map((contribution) => <span key={contribution.id}>{shortDate(contribution.date)}</span>)}</div></td>
+              <td className="number-cell"><div className="investor-contribution-cell amount">{contributions.length === 0 ? <small>Sin monto</small> : contributions.map((contribution) => <span key={contribution.id}><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></span>)}</div></td>
               <td className="number-cell profit-cell"><b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b>{(investor.profitCurrency ?? "USD") === "ARS" && <small>{money(investor.profitUsd, "USD")}</small>}</td>
               <td className="number-cell"><b>{money(metrics.capital + investor.profitUsd, "USD")}</b></td>
               <td className="number-cell">{percent(metrics.totalReturnPercent)}</td>
               <td className="number-cell annual-rate-cell">{metrics.annualRate === null ? <small className="rate-warning">{metrics.annualRateStatus}</small> : <div className="annual-rate-value"><b>{percent(metrics.annualRate)}</b><small>{Math.round(metrics.termDays ?? 0)} días</small></div>}</td>
-            </tr>{expanded && <tr className="investor-actions-row"><td colSpan={8}><div><span>Tocá una fecha o un monto para editar ese aporte.</span><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar inversor</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar inversor</button></div></div></td></tr>}</Fragment>;
+            </tr>{expanded && <tr className="investor-actions-row"><td colSpan={7}><div className="investor-expanded-actions"><div className="contribution-edit-list">{contributions.map((contribution) => <button className="mini-button" type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>Editar aporte · {shortDate(contribution.date)} · {money(contribution.amount, contribution.currency ?? "USD")}</button>)}</div><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar inversor</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar inversor</button></div></div></td></tr>}</Fragment>;
           })}</tbody>
         </table>
         <div className="annual-rate-help"><b>Tasa anual simple, no efectiva</b><span>Ganancia % × 365 ÷ días hasta la venta. No supone reinversión ni interés compuesto. Si hay varios aportes, usa una fecha promedio ponderada por cada monto convertido a USD.</span></div>
       </div>
-      <div className="investor-mobile-list">{data.investors.map((investor) => {
+      <div className="investor-mobile-list">
+        <article className={`investor-mobile-card own-capital-card ${expandedInvestorId === "own-capital" ? "expanded" : ""}`}>
+          <button type="button" className="investor-mobile-summary" aria-expanded={expandedInvestorId === "own-capital"} onClick={() => setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital")}>
+            <div><b>Aporte propio</b><small>Fila fija</small></div>
+            <span>Monto <b>{money(effectiveOwnCapital, "USD")}</b></span>
+            <span>Tasa anual <b>{ownAnnualRate === null ? ownRateStatus : percent(ownAnnualRate)}</b></span>
+          </button>
+          {expandedInvestorId === "own-capital" && <div className="investor-mobile-details">
+            <div className="investor-mobile-stats"><span>Fecha <b>{plan.purchaseDate ? shortDate(plan.purchaseDate) : "—"}</b></span><span>Ganancia <b>{money(ownerProfit, "USD")}</b></span><span>A devolver <b>{money(effectiveOwnCapital + ownerProfit, "USD")}</b></span><span>Ganancia % <b>{percent(ownReturnPercent)}</b></span></div>
+            <div className="investor-mobile-actions"><button className="mini-button" onClick={() => setModal("investmentPlan")}>Editar valores de la inversión</button></div>
+          </div>}
+        </article>
+        {data.investors.map((investor) => {
         const metrics = investorMetrics(investor, plan.projectedSaleDate);
         const expanded = expandedInvestorId === investor.id;
+        const contributions = investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
         return <article className={`investor-mobile-card ${expanded ? "expanded" : ""}`} key={investor.id}>
           <button type="button" className="investor-mobile-summary" aria-expanded={expanded} onClick={() => setExpandedInvestorId((current) => current === investor.id ? "" : investor.id)}>
             <div><b>{investor.name}</b><small>{investor.contributions.length} {investor.contributions.length === 1 ? "aporte" : "aportes"}</small></div>
-            <span>Capital <b>{money(metrics.capital, "USD")}</b></span>
+            <span>Monto <b>{money(metrics.capital, "USD")}</b></span>
             <span>Tasa anual <b>{metrics.annualRate === null ? metrics.annualRateStatus : percent(metrics.annualRate)}</b></span>
           </button>
           {expanded && <div className="investor-mobile-details">
             <div className="investor-mobile-stats"><span>Ganancia <b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b></span><span>A devolver <b>{money(metrics.capital + investor.profitUsd, "USD")}</b></span><span>Ganancia % <b>{percent(metrics.totalReturnPercent)}</b></span><span>Plazo <b>{metrics.termDays ? `${Math.round(metrics.termDays)} días` : "—"}</b></span></div>
-            <div className="investor-mobile-contributions"><span>Aportes recibidos</span>{investor.contributions.length === 0 ? <small>Sin aportes</small> : <><div className="contribution-mobile-head"><span>Fecha</span><span>Monto</span></div>{investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((contribution) => <button type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></button>)}</>}</div>
+            <div className="investor-mobile-contributions"><span>Aportes recibidos</span>{contributions.length === 0 ? <small>Sin aportes</small> : <><div className="contribution-mobile-head"><span>Fecha</span><span>Monto</span></div>{contributions.map((contribution) => <div className="contribution-mobile-data" key={contribution.id}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></div>)}</>}</div>
+            {contributions.length > 0 && <div className="contribution-edit-list">{contributions.map((contribution) => <button className="mini-button" type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>Editar aporte · {shortDate(contribution.date)}</button>)}</div>}
             <div className="investor-mobile-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar</button></div>
           </div>}
         </article>;
-      })}<div className="mobile-rate-note">Tasa anual simple: no incluye reinversión.</div></div></>}
+      })}<div className="mobile-rate-note">Tasa anual simple: no incluye reinversión.</div></div></>
     </div>;
   };
 
