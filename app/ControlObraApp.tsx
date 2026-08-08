@@ -148,9 +148,7 @@ const nav: Array<{ id: View; label: string; icon: string }> = [
   { id: "home", label: "Resumen", icon: "⌂" },
   { id: "expenses", label: "Gastos", icon: "$" },
   { id: "payments", label: "Pagos", icon: "✓" },
-  { id: "progress", label: "Avance", icon: "%" },
   { id: "budgets", label: "Presupuestos", icon: "≡" },
-  { id: "categories", label: "Categorías", icon: "+" },
 ];
 
 function Modal({ title, close, children, wide = false }: { title: string; close: () => void; children: ReactNode; wide?: boolean }) {
@@ -173,8 +171,8 @@ function Modal({ title, close, children, wide = false }: { title: string; close:
 function CurrencyFields({ currency, setCurrency }: { currency: Currency; setCurrency: (value: Currency) => void }) {
   return (
     <div className="currency-toggle" aria-label="Moneda">
-      <button type="button" className={currency === "ARS" ? "active" : ""} onClick={() => setCurrency("ARS")}>Pesos</button>
-      <button type="button" className={currency === "USD" ? "active" : ""} onClick={() => setCurrency("USD")}>Dólares</button>
+      <button type="button" className={currency === "ARS" ? "active" : ""} onClick={() => setCurrency("ARS")}>ARS</button>
+      <button type="button" className={currency === "USD" ? "active" : ""} onClick={() => setCurrency("USD")}>USD</button>
     </div>
   );
 }
@@ -194,6 +192,7 @@ export function ControlObraApp() {
   const [modal, setModal] = useState<ModalName>(null);
   const [selectedExpenseId, setSelectedExpenseId] = useState<string>("");
   const [selectedBudgetId, setSelectedBudgetId] = useState<string>("");
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<string>("all");
   const [rate, setRate] = useState(1500);
   const [rateDate, setRateDate] = useState(today());
   const [rateSource, setRateSource] = useState("Cotización manual");
@@ -347,12 +346,6 @@ export function ControlObraApp() {
           <strong>{money(totals.remainingArs, "ARS")}</strong>
           <small>{money(totals.remainingUsd, "USD")}</small>
         </article>
-        <article className="summary-card">
-          <div className="summary-icon violet">%</div>
-          <span>Avance general</span>
-          <strong>{Math.round(totals.averageProgress)}%</strong>
-          <small>Promedio del avance físico cargado</small>
-        </article>
       </section>
 
       <section className="dashboard-grid">
@@ -383,40 +376,53 @@ export function ControlObraApp() {
       <section className="quick-section">
         <div className="section-title"><div><span className="eyebrow">Accesos rápidos</span><h2>¿Qué querés hacer?</h2></div></div>
         <div className="quick-grid">
-          <button onClick={() => quickOpen("expense")}><span className="quick-icon blue">＋</span><b>Ingresar gasto</b><small>Común o adicional</small></button>
+          <button onClick={() => quickOpen("expense")}><span className="quick-icon blue">＋</span><b>Ingresar gasto</b><small>Nuevo movimiento</small></button>
           <button onClick={() => quickOpen("payment", "payments")}><span className="quick-icon green">$</span><b>Ingresar pago</b><small>Total o parcial</small></button>
-          <button onClick={() => quickOpen("progress", "progress")}><span className="quick-icon violet">%</span><b>Actualizar avance</b><small>De 0% a 100%</small></button>
           <button onClick={() => quickOpen("budget", "budgets")}><span className="quick-icon amber">≡</span><b>Nuevo presupuesto</b><small>Comparar proveedores</small></button>
         </div>
       </section>
     </div>
   );
 
-  const renderExpenses = () => (
-    <div className="page-content">
-      <PageHeading eyebrow="Movimientos" title="Gastos" copy="Cada gasto conserva su moneda y cotización original." action="Ingresar gasto" onAction={() => setModal("expense")} />
-      {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay gastos" copy="Ingresá el primer gasto o aprobá un presupuesto para comenzar." action="Ingresar gasto" onAction={() => setModal("expense")} /> : (
-        <div className="list-panel">
-          {data.expenses.slice().sort((a, b) => b.date.localeCompare(a.date)).map((expense) => {
-            const paid = paymentForExpense(expense);
-            const remaining = remainingForExpense(expense);
-            const percent = expense.amount ? Math.min(100, (paid / expense.amount) * 100) : 0;
-            return <article className="expense-row" key={expense.id}>
-              <div className={`type-dot ${expense.kind}`} />
-              <div className="expense-main">
-                <div className="row-title"><b>{expense.description}</b><KindBadge kind={expense.kind} /></div>
-                <small>{pathName(expense.categoryId, expense.subcategoryId)}{expense.responsible ? ` · ${expense.responsible}` : ""}</small>
-              </div>
-              <div className="expense-progress"><ProgressBar value={percent} tone={percent >= 100 ? "green" : "blue"} /><small>{Math.round(percent)}% pagado</small></div>
-              <div className="expense-amount"><b>{money(expense.amount, expense.currency)}</b><small>Resta {money(remaining, expense.currency)}</small></div>
-              <time>{shortDate(expense.date)}</time>
-              <button className="mini-button" onClick={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}>Editar</button>
-            </article>;
-          })}
+  const renderExpenses = () => {
+    const filteredExpenses = data.expenses
+      .filter((expense) => expenseCategoryFilter === "all" || expense.categoryId === expenseCategoryFilter)
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    return <div className="page-content">
+      <PageHeading eyebrow="Movimientos" title="Gastos" copy="Una grilla simple con todos los gastos de la obra." action="Ingresar gasto" onAction={() => setModal("expense")} />
+      <div className="expense-category-filters" aria-label="Filtrar gastos por categoría">
+        <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
+        {categories.map((category) => {
+          const count = data.expenses.filter((expense) => expense.categoryId === category.id).length;
+          return <button key={category.id} className={expenseCategoryFilter === category.id ? "active" : ""} onClick={() => setExpenseCategoryFilter(category.id)}>{category.name} <span>{count}</span></button>;
+        })}
+      </div>
+      {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay gastos" copy="Ingresá el primer gasto o aprobá un presupuesto para comenzar." action="Ingresar gasto" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay gastos en esta categoría.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
+        <div className="expense-sheet-wrap">
+          <table className="expense-sheet">
+            <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Descripción</th><th>Responsable</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Saldo</th><th aria-label="Acciones" /></tr></thead>
+            <tbody>{filteredExpenses.map((expense) => {
+              const paid = paymentForExpense(expense);
+              const remaining = remainingForExpense(expense);
+              return <tr key={expense.id}>
+                <td className="date-cell">{shortDate(expense.date)}</td>
+                <td><b>{categoryName(expense.categoryId)}</b></td>
+                <td>{subcategoryName(expense.subcategoryId) || "—"}</td>
+                <td>{expense.description || "—"}</td>
+                <td>{expense.responsible || "—"}</td>
+                <td className="number-cell"><b>{money(expense.amount, expense.currency)}</b></td>
+                <td className="number-cell paid-cell">{money(paid, expense.currency)}</td>
+                <td className="number-cell balance-cell">{money(remaining, expense.currency)}</td>
+                <td><button className="mini-button" onClick={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}>Editar</button></td>
+              </tr>;
+            })}</tbody>
+          </table>
         </div>
       )}
-    </div>
-  );
+    </div>;
+  };
 
   const renderPayments = () => {
     const pending = data.expenses.filter((expense) => remainingForExpense(expense) > 0.005);
@@ -559,12 +565,10 @@ export function ControlObraApp() {
         {view === "home" && renderHome()}
         {view === "expenses" && renderExpenses()}
         {view === "payments" && renderPayments()}
-        {view === "progress" && renderProgress()}
         {view === "budgets" && renderBudgets()}
-        {view === "categories" && renderCategories()}
       </section>
 
-      <nav className="bottom-nav">{nav.slice(0, 5).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>
+      <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>
       <button className="mobile-fab" aria-label="Ingresar gasto" onClick={() => setModal("expense")}>＋</button>
 
       {modal === "expense" && <ExpenseModal data={data} rate={rate} expense={data.expenses.find((item) => item.id === selectedExpenseId)} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(expense) => {
@@ -572,7 +576,6 @@ export function ControlObraApp() {
         setModal(null); setSelectedExpenseId(""); notify("Gasto guardado");
       }} />}
       {modal === "payment" && <PaymentModal data={data} rate={rate} initialExpenseId={selectedExpenseId} remainingForExpense={remainingForExpense} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedExpenseId(""); notify("Pago registrado"); }} />}
-      {modal === "progress" && <ProgressModal categories={categories} subcategories={subcategories} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(item) => { setData((current) => ({ ...current, progress: [...current.progress.filter((entry) => !(entry.categoryId === item.categoryId && entry.subcategoryId === item.subcategoryId)), item] })); setModal(null); notify("Avance actualizado"); }} />}
       {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} close={() => setModal(null)} save={(nextRate, nextDate) => { setRate(nextRate); setRateDate(nextDate); setRateSource("Cotización ajustada manualmente"); setModal(null); notify("Cotización actualizada"); }} />}
@@ -614,24 +617,19 @@ function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCate
   const [subcategoryId, setSubcategoryId] = useState(expense?.subcategoryId ?? "");
   const [responsible, setResponsible] = useState(expense?.responsible ?? "");
   const [amount, setAmount] = useState(expense?.amount?.toString() ?? "");
-  const [currency, setCurrency] = useState<Currency>(expense?.currency ?? "ARS");
-  const [kind, setKind] = useState<ExpenseKind>(expense?.kind ?? "manual");
-  const [budgetGroupId, setBudgetGroupId] = useState(expense?.budgetGroupId ?? "");
+  const [currency, setCurrency] = useState<Currency>(expense?.currency ?? "USD");
   const selectedRate = expense?.rate ?? rate;
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    save({ id: expense?.id ?? uid("exp"), date, description: description.trim(), categoryId, subcategoryId, responsible: responsible.trim(), amount: Number(amount), currency, rate: selectedRate, kind, budgetGroupId: kind === "additional" ? budgetGroupId : expense?.budgetGroupId });
+    save({ id: expense?.id ?? uid("exp"), date, description: description.trim(), categoryId, subcategoryId, responsible: responsible.trim(), amount: Number(amount), currency, rate: selectedRate, kind: expense?.kind ?? "manual", budgetGroupId: expense?.budgetGroupId });
   };
   return <Modal title={expense ? "Editar gasto" : "Ingresar gasto"} close={close} wide><form className="form-grid" onSubmit={submit}>
-    <label className="span-2"><span>Descripción del gasto</span><input required value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
     <CategorySelect label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={data.categories} onNew={() => addNamedItem("category")} />
     <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={data.categories} subcategories={data.subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />
+    <label className="span-2"><span>Descripción del gasto (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
     <label><span>Fecha</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
     <label><span>Responsable (opcional)</span><input value={responsible} onChange={(event) => setResponsible(event.target.value)} placeholder="Arquitecto, albañil…" /></label>
-    <label><span>Monto</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></label>
-    <div className="field"><span>Moneda</span><CurrencyFields currency={currency} setCurrency={setCurrency} /></div>
-    {!expense || expense.kind !== "approved" ? <div className="span-2 form-choice"><label><input type="radio" checked={kind === "manual"} onChange={() => setKind("manual")} /> Gasto común</label><label><input type="radio" checked={kind === "additional"} onChange={() => setKind("additional")} /> Gasto adicional a un presupuesto</label></div> : null}
-    {kind === "additional" && <label className="span-2"><span>Presupuesto relacionado</span><select required value={budgetGroupId} onChange={(event) => setBudgetGroupId(event.target.value)}><option value="">Elegir presupuesto aprobado…</option>{data.budgetGroups.filter((group) => group.approvedOfferId).map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}</select></label>}
+    <div className="amount-field span-2"><span>Monto</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><input aria-label={`Monto en ${currency}`} required min="0.01" step="0.01" inputMode="decimal" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder={currency} /></label></div></div>
     {amount && <div className="conversion-note span-2">Equivale a <b>{currency === "ARS" ? money(Number(amount) / selectedRate, "USD") : money(Number(amount) * selectedRate, "ARS")}</b> usando dólar {money(selectedRate, "ARS")}.</div>}
     <FormActions close={close} label={expense ? "Guardar cambios" : "Guardar gasto"} />
   </form></Modal>;
