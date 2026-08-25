@@ -274,6 +274,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .investment-plan-head h2 { margin: 5px 0 0; font-size: 20px; }
 .investment-plan-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 11px; }
 .investment-plan-grid article { min-height: 116px; padding: 16px; border: 1px solid #b7c3bd; border-radius: 13px; background: #e8edeb; }
+.investment-plan-grid article.clickable-property-card { cursor: pointer; }
+.investment-plan-grid article.clickable-property-card:hover { border-color: var(--blue); background: #eef5f3; }
+.investment-plan-grid article.clickable-property-card:focus-visible { outline: 3px solid rgba(23,107,135,.28); outline-offset: 2px; }
 .investment-plan-grid article.automatic { border-color: #9fc3cf; background: var(--blue-soft); }
 .investment-plan-grid article.sale { border-color: #96c5af; background: var(--green-soft); }
 .investment-plan-grid article.budget-alert { border-color: #db9e95; background: var(--red-soft); }
