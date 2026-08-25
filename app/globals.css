@@ -388,6 +388,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .calculated-own-capital > span { color: var(--blue-dark); text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
 .calculated-own-capital strong { color: var(--blue-dark); font-size: 19px; }
 .calculated-own-capital small { color: #52727c; }
+.property-total-preview { display: grid; gap: 5px; padding: 14px; border: 1px solid #a7b5ae; border-radius: 11px; background: #e1e7e3; }
+.property-total-preview > span { color: #405149; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
+.property-total-preview strong { color: var(--ink); font-size: 21px; }
+.property-total-preview small { color: var(--muted); }
 .manual-own-toggle { display: flex !important; grid-template-columns: none; align-items: center; gap: 9px !important; padding: 11px 13px; border: 1px solid #b6c2bc; border-radius: 10px; background: #e2e8e5; }
 .manual-own-toggle input { width: 18px !important; height: 18px !important; flex: 0 0 auto; accent-color: var(--blue); box-shadow: none !important; }
 .manual-own-toggle span { text-transform: none !important; letter-spacing: 0 !important; color: var(--ink) !important; font-size: 12px !important; }

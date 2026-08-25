@@ -201,6 +201,7 @@ const toArs = (amount: number, currency: Currency, rate: number) =>
   currency === "ARS" ? amount : amount * rate;
 const toUsd = (amount: number, currency: Currency, rate: number) =>
   currency === "USD" ? amount : amount / rate;
+const propertyCostWithCommission = (propertyValueUsd: number) => propertyValueUsd * 1.03;
 const percent = (value: number) => `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value)}%`;
 const contributionInUsd = (contribution: InvestorContribution) => toUsd(contribution.amount, contribution.currency ?? "USD", contribution.rate ?? 1500);
 const investorMetrics = (investor: Investor, projectedSaleDate: string) => {
@@ -423,6 +424,8 @@ export function ControlObraApp() {
   const renderHome = () => {
     const plan = data.investmentPlan;
     const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
+    const propertyCommissionUsd = plan.propertyValueUsd * 0.03;
+    const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd);
     return <div className="page-content home-view">
       <section className="welcome-row">
         <div><h1>Resumen de la obra</h1></div>
@@ -432,7 +435,7 @@ export function ControlObraApp() {
       <section className="investment-plan-panel home-plan-panel">
         <div className="investment-plan-head"><div><h2>Inversión y venta</h2></div><button className="secondary-button" onClick={() => setModal("investmentPlan")}>Editar valores</button></div>
         <div className="investment-plan-grid">
-          <article><span>Valor de la propiedad</span><strong>{money(plan.propertyValueUsd, "USD")}</strong><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"}</small></article>
+          <article><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{money(plan.propertyValueUsd, "USD")} + {money(propertyCommissionUsd, "USD")} en comisiones (3%)</small><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"}</small></article>
           <article className={plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : "Dentro de lo proyectado"}</small></article>
           <article className="sale"><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
         </div>
@@ -441,7 +444,7 @@ export function ControlObraApp() {
       <section className="summary-grid">
         <article className="summary-card featured">
           <div className="summary-icon">$</div>
-          <span>Total comprometido</span>
+          <span>Costo de remodelación</span>
           <strong>{money(totals.committedArs, "ARS")}</strong>
           <small>{money(totals.committedUsd, "USD")} · cotizaciones históricas</small>
         </article>
@@ -695,7 +698,7 @@ export function ControlObraApp() {
     const plan = data.investmentPlan;
     const investorCapital = investorCapitalTotal;
     const investorProfit = data.investors.reduce((sum, investor) => sum + investor.profitUsd, 0);
-    const calculatedOwnCapital = Math.max(0, plan.propertyValueUsd + plan.remodelBudgetUsd - investorCapital);
+    const calculatedOwnCapital = Math.max(0, propertyCostWithCommission(plan.propertyValueUsd) + plan.remodelBudgetUsd - investorCapital);
     const effectiveOwnCapital = plan.ownCapitalManual ? plan.ownCapitalUsd : calculatedOwnCapital;
     const ownCapitalDifference = effectiveOwnCapital - calculatedOwnCapital;
     const ownCapitalMismatch = plan.ownCapitalManual && Math.abs(ownCapitalDifference) > 0.005;
@@ -716,7 +719,7 @@ export function ControlObraApp() {
         <article><span>Total a devolver</span><strong>{money(investorCapital + investorProfit, "USD")}</strong></article>
         <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada del aporte propio</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Después de la inversión y devolución a inversores" : "Falta cargar el precio de venta"}</small></article>
       </section>
-      {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según propiedad + remodelación proyectada − inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
+      {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según propiedad con comisiones + remodelación proyectada − inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
 
       <><div className="investor-sheet-wrap investor-desktop-view">
         <table className="investor-sheet">
@@ -732,7 +735,7 @@ export function ControlObraApp() {
               <td className="number-cell"><b>{money(effectiveOwnCapital + ownerProfit, "USD")}</b></td>
               <td className="number-cell">{percent(ownReturnPercent)}</td>
               <td className="number-cell annual-rate-cell">{ownAnnualRate === null ? <small className="rate-warning">{ownRateStatus}</small> : <div className="annual-rate-value"><b>{percent(ownAnnualRate)}</b><small>{Math.round(ownTermDays ?? 0)} días</small></div>}</td>
-            </tr>{expandedInvestorId === "own-capital" && <tr className="investor-actions-row own-capital-actions-row"><td colSpan={7}><div><span>Se calcula con propiedad + remodelación proyectada − aportes de inversores.</span><div className="investor-actions"><button className="mini-button" onClick={() => setModal("investmentPlan")}>Editar valores de la inversión</button></div></div></td></tr>}</Fragment>
+            </tr>{expandedInvestorId === "own-capital" && <tr className="investor-actions-row own-capital-actions-row"><td colSpan={7}><div><span>Se calcula con propiedad + 3% de comisiones + remodelación proyectada − aportes de inversores.</span><div className="investor-actions"><button className="mini-button" onClick={() => setModal("investmentPlan")}>Editar valores de la inversión</button></div></div></td></tr>}</Fragment>
             {data.investors.map((investor) => {
             const metrics = investorMetrics(investor, plan.projectedSaleDate);
             const expanded = expandedInvestorId === investor.id;
@@ -1031,15 +1034,18 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
   const [salePrice, setSalePrice] = useState(plan.projectedSalePriceUsd ? plan.projectedSalePriceUsd.toString() : "");
   const [purchaseDate, setPurchaseDate] = useState(plan.purchaseDate);
   const [saleDate, setSaleDate] = useState(plan.projectedSaleDate);
-  const calculatedOwnCapital = Math.max(0, (Number(propertyValue) || 0) + (Number(remodelBudget) || 0) - investorCapitalUsd);
+  const propertyCommission = (Number(propertyValue) || 0) * 0.03;
+  const propertyTotal = propertyCostWithCommission(Number(propertyValue) || 0);
+  const calculatedOwnCapital = Math.max(0, propertyTotal + (Number(remodelBudget) || 0) - investorCapitalUsd);
   const manualDifference = (Number(ownCapital) || 0) - calculatedOwnCapital;
   return <Modal title="Datos de la inversión" close={close} wide><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
     save({ propertyValueUsd: Number(propertyValue) || 0, ownCapitalUsd: ownCapitalManual ? Number(ownCapital) || 0 : calculatedOwnCapital, ownCapitalManual, remodelBudgetUsd: Number(remodelBudget) || 0, projectedSalePriceUsd: Number(salePrice) || 0, purchaseDate, projectedSaleDate: saleDate });
   }}>
-    <label><span>Valor de la propiedad (USD)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label>
+    <label><span>Valor de la propiedad (USD, sin comisiones)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label>
     <label><span>Fecha de compra de la propiedad</span><input type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} /></label>
-    <div className="calculated-own-capital span-2"><span>Aporte propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Propiedad + remodelación proyectada − {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
+    <div className="property-total-preview span-2"><span>Costo total de la propiedad</span><strong>{money(propertyTotal, "USD")}</strong><small>{money(Number(propertyValue) || 0, "USD")} valor + {money(propertyCommission, "USD")} comisiones (3%).</small></div>
+    <div className="calculated-own-capital span-2"><span>Aporte propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Propiedad con 3% de comisiones + remodelación proyectada − {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
     <label className="manual-own-toggle span-2"><input type="checkbox" checked={ownCapitalManual} onChange={(event) => { setOwnCapitalManual(event.target.checked); if (event.target.checked && !ownCapital) setOwnCapital(calculatedOwnCapital.toString()); }} /><span>Ingresar un aporte propio diferente al cálculo automático</span></label>
     {ownCapitalManual && <label className="span-2"><span>Aporte propio informado (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>}
     {ownCapitalManual && Math.abs(manualDifference) > 0.005 && <div className="form-alert error span-2">⚠ No coincide con el cálculo automático. Hay una diferencia de <b>{money(Math.abs(manualDifference), "USD")}</b>.</div>}
