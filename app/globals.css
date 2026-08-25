@@ -173,6 +173,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .expense-category-filters button span { margin-left: 5px; padding: 2px 6px; border-radius: 99px; background: #eef3f0; color: var(--muted); font-size: 10px; }
 .expense-category-filters button.active { border-color: var(--blue); background: var(--blue); color: white; }
 .expense-category-filters button.active span { background: rgba(255,255,255,.18); color: white; }
+.category-manager-trigger { margin: -5px 0 15px; }
 .expense-sheet-wrap { overflow-x: auto; background: #f8faf9; border: 1px solid #a7b5ae; border-radius: 16px; box-shadow: var(--shadow); }
 .expense-sheet { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 12px; }
 .expense-sheet th { position: sticky; top: 0; z-index: 1; padding: 11px 13px; background: #cfd8d3; color: #31423a; border-right: 1px solid #bac6c0; border-bottom: 1px solid #aab8b1; text-align: left; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; }
@@ -374,6 +375,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .subcategory-chips button, .subcategory-chips span { border: 0; border-radius: 99px; padding: 5px 9px; background: var(--blue-soft); color: var(--blue-dark); font-size: 10px; font-weight: 700; }
 .subcategory-chips button:hover { background: #d5e9f0; }
 .subcategory-chips span { background: #f1f4f2; color: var(--muted); font-weight: 600; }
+.subcategory-chips .subcategory-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-soft); color: var(--blue-dark); }
+.subcategory-chips .subcategory-chip button { width: 16px; height: 16px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #c6dce4; color: #416b79; font-size: 13px; line-height: 1; }
+.subcategory-chips .subcategory-chip button:hover { background: var(--red); color: white; }
 .catalog-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; }
 .catalog-actions button { border: 0; background: transparent; color: var(--blue); padding: 7px 8px; font-size: 11px; font-weight: 700; }
 .catalog-actions button.danger { color: var(--red); }

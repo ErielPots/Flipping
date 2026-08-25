@@ -108,6 +108,8 @@ const defaultCategories: Category[] = [
   { id: "cat-placares", name: "Placares", archived: false, subcategoryIds: [] },
   { id: "cat-ventanas", name: "Ventanas", archived: false, subcategoryIds: [] },
 ];
+const defaultCategoryIds = new Set(defaultCategories.map((item) => item.id));
+const defaultSubcategoryIds = new Set(defaultSubcategories.map((item) => item.id));
 
 const initialState: AppState = {
   catalogVersion: 2,
@@ -151,8 +153,6 @@ function normalizeState(candidate: AppState | undefined): AppState {
     ...candidate.progress.map((item) => item.subcategoryId),
     ...candidate.budgetGroups.map((item) => item.subcategoryId),
   ]);
-  const defaultCategoryIds = new Set(defaultCategories.map((item) => item.id));
-  const defaultSubcategoryIds = new Set(defaultSubcategories.map((item) => item.id));
   const oldSeedCategories = new Set(["cat-materiales", "cat-mano-obra"]);
 
   const preservedCategories = candidate.categories
@@ -546,6 +546,7 @@ export function ControlObraApp() {
           return count > 0 ? <button key={category.id} className={expenseCategoryFilter === category.id ? "active" : ""} onClick={() => setExpenseCategoryFilter(category.id)}>{category.name} <span>{count}</span></button> : null;
         })}
       </div>
+      <button className="text-button category-manager-trigger" onClick={() => setView("categories")}>Administrar categorías</button>
       {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay costos" copy="Ingresá el primer costo para comenzar." action="Ingresar costo" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay costos en esta categoría.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
         <><div className="expense-sheet-wrap expense-desktop-view">
           <table className="expense-sheet">
@@ -813,7 +814,7 @@ export function ControlObraApp() {
 
   const renderCategories = () => (
     <div className="page-content">
-      <PageHeading eyebrow="Organización" title="Categorías y subcategorías" copy="Podés agregar, renombrar o archivar opciones en cualquier momento." />
+      <SimpleHeading title="Categorías y subcategorías" />
       <section className="manage-card category-catalog">
         <div className="manage-head"><h2>Categorías de costos</h2><button className="secondary-button" onClick={() => addNamedItem("category")}>＋ Agregar categoría</button></div>
         {categories.map((category) => {
@@ -822,10 +823,10 @@ export function ControlObraApp() {
             <div className="category-catalog-main">
               <b>{category.name}</b>
               <div className="subcategory-chips">
-                {linked.length ? linked.map((subcategory) => <button key={subcategory.id} title="Renombrar subcategoría" onClick={() => renameItem("subcategories", subcategory)}>{subcategory.name}</button>) : <span>Sin subcategorías</span>}
+                {linked.length ? linked.map((subcategory) => <span className="subcategory-chip" key={subcategory.id}>{subcategory.name}{!defaultSubcategoryIds.has(subcategory.id) && <button title="Eliminar subcategoría" onClick={() => deleteCreatedItem("subcategories", subcategory)}>×</button>}</span>) : <span>Sin subcategorías</span>}
               </div>
             </div>
-            <div className="catalog-actions"><button onClick={() => addSubcategoryForCategory(category.id)}>＋ Subcategoría</button><button onClick={() => renameItem("categories", category)}>Renombrar</button><button className="danger" onClick={() => archiveItem("categories", category)}>Archivar</button></div>
+            <div className="catalog-actions"><button onClick={() => addSubcategoryForCategory(category.id)}>＋ Subcategoría</button><button onClick={() => renameItem("categories", category)}>Renombrar</button>{!defaultCategoryIds.has(category.id) && <button className="danger" onClick={() => deleteCreatedItem("categories", category)}>Eliminar</button>}</div>
           </div>;
         })}
       </section>
@@ -855,9 +856,22 @@ export function ControlObraApp() {
     if (!name) return;
     setData((current) => ({ ...current, [collection]: current[collection].map((entry) => entry.id === item.id ? { ...entry, name } : entry) }));
   };
-  const archiveItem = (collection: "categories" | "subcategories", item: Category) => {
-    if (!window.confirm(`¿Archivar “${item.name}”? Los movimientos existentes conservarán este nombre.`)) return;
-    setData((current) => ({ ...current, [collection]: current[collection].map((entry) => entry.id === item.id ? { ...entry, archived: true } : entry) }));
+  const deleteCreatedItem = (collection: "categories" | "subcategories", item: Category) => {
+    const isCategory = collection === "categories";
+    const hasReferences = isCategory
+      ? data.expenses.some((entry) => entry.categoryId === item.id) || data.progress.some((entry) => entry.categoryId === item.id) || data.budgetGroups.some((entry) => entry.categoryId === item.id)
+      : data.expenses.some((entry) => entry.subcategoryId === item.id) || data.progress.some((entry) => entry.subcategoryId === item.id) || data.budgetGroups.some((entry) => entry.subcategoryId === item.id);
+    if (hasReferences) {
+      window.alert(`No se puede eliminar “${item.name}” porque ya está usado en movimientos, presupuestos o avances.`);
+      return;
+    }
+    if (!window.confirm(`¿Eliminar “${item.name}”? Esta acción no se puede deshacer.`)) return;
+    setData((current) => ({
+      ...current,
+      [collection]: current[collection].filter((entry) => entry.id !== item.id),
+      categories: isCategory ? current.categories.filter((entry) => entry.id !== item.id) : current.categories.map((entry) => ({ ...entry, subcategoryIds: entry.subcategoryIds?.filter((id) => id !== item.id) })),
+    }));
+    notify(`${isCategory ? "Categoría" : "Subcategoría"} eliminada`);
   };
 
   if (!loaded) return <div className="app-loading"><div className="loading-mark">CO</div><h1>Control de Obra</h1><p>Preparando tus datos…</p></div>;
@@ -881,6 +895,7 @@ export function ControlObraApp() {
         {view === "payments" && renderPayments()}
         {view === "budgets" && renderBudgets()}
         {view === "investors" && renderInvestors()}
+        {view === "categories" && renderCategories()}
       </section>
 
       <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>
