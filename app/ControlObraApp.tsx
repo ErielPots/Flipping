@@ -979,6 +979,7 @@ function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCate
 }
 
 function InlinePaymentForm({ expense, rate, remaining, edit, remove, close, save }: { expense: Expense; rate: number; remaining: number; edit: () => void; remove: () => void; close: () => void; save: (payment: Payment) => void }) {
+  const [partial, setPartial] = useState(false);
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -998,38 +999,44 @@ function InlinePaymentForm({ expense, rate, remaining, edit, remove, close, save
     if (!amount || Number(amount) <= 0 || Number(amount) > maxAmount + 0.005) return;
     save({ id: uid("pay"), expenseId: expense.id, date, description: description.trim(), amount: Number(amount), currency, rate });
   };
+  const payFull = () => save({ id: uid("pay"), expenseId: expense.id, date: today(), description: "", amount: remaining, currency: expense.currency, rate });
 
   return <div className="inline-payment-panel">
     <div className="expense-detail-head">
       <div className="expense-detail-grid"><div><span>Descripción</span><b>{expense.description || "Sin descripción"}</b></div><div><span>Responsable</span><b>{expense.responsible || "Sin responsable"}</b></div></div>
       <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar costo</button><button type="button" className="danger-button compact" onClick={remove}>Eliminar costo</button><button type="button" className="icon-button" onClick={close} aria-label="Cerrar detalles">×</button></div>
     </div>
-    {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este costo ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : <form className="inline-payment-form" onSubmit={submit}>
+    {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este costo ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : !partial ? <div className="full-payment-choice"><div><span>Saldo pendiente</span><b>{money(remaining, expense.currency)}</b></div><button type="button" className="primary-button" onClick={payFull}>Registrar pago total</button><button type="button" className="text-button" onClick={() => setPartial(true)}>Registrar pago parcial</button></div> : <form className="inline-payment-form" onSubmit={submit}>
       <label><span>Fecha del pago</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       <div className="amount-field"><span>Monto pagado</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={(value) => { setCurrency(value); setAmount(""); }} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`Monto pagado en ${currency}`} required invalid={Number(amount) > maxAmount + 0.005} value={amount} setValue={setAmount} placeholder={currency} /></label></div></div>
       <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
-      <button className="primary-button inline-payment-submit" type="submit">Guardar pago</button>
+      <button className="primary-button inline-payment-submit" type="submit">Guardar pago parcial</button>
       {amount && Number(amount) > 0 && <div className={`inline-payment-note ${Number(amount) > maxAmount + 0.005 ? "error" : ""}`}>{Number(amount) > maxAmount + 0.005 ? <>El monto supera el saldo. El máximo es <b>{money(maxAmount, currency)}</b>.</> : <>Se descontarán <b>{money(debitAmount, expense.currency)}</b> del saldo.</>}</div>}
+      <button className="text-button inline-payment-back" type="button" onClick={() => setPartial(false)}>Volver a pago total</button>
     </form>}
   </div>;
 }
 
 function PaymentModal({ data, rate, initialExpenseId, remainingForExpense, close, save }: { data: AppState; rate: number; initialExpenseId: string; remainingForExpense: (expense: Expense) => number; close: () => void; save: (payment: Payment) => void }) {
   const [expenseId, setExpenseId] = useState(initialExpenseId);
+  const [partial, setPartial] = useState(false);
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState<Currency>("ARS");
+  const [currency, setCurrency] = useState<Currency>(data.expenses.find((item) => item.id === initialExpenseId)?.currency ?? "ARS");
   const expense = data.expenses.find((item) => item.id === expenseId);
   const submit = (event: FormEvent) => { event.preventDefault(); if (Number(amount) <= 0) return; save({ id: uid("pay"), expenseId, date, description: description.trim(), amount: Number(amount), currency, rate }); };
+  const selectExpense = (value: string) => { const next = data.expenses.find((item) => item.id === value); setExpenseId(value); setCurrency(next?.currency ?? "ARS"); setAmount(""); setPartial(false); };
+  const payFull = () => { if (!expense) return; save({ id: uid("pay"), expenseId: expense.id, date: today(), description: "", amount: remainingForExpense(expense), currency: expense.currency, rate }); };
   return <Modal title="Registrar pago" close={close}><form className="form-grid" onSubmit={submit}>
-    <label className="span-2"><span>Costo a pagar</span><select required value={expenseId} onChange={(event) => setExpenseId(event.target.value)}><option value="">Elegir costo…</option>{data.expenses.filter((item) => remainingForExpense(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{item.description || data.categories.find((category) => category.id === item.categoryId)?.name || "Costo"} · resta {money(remainingForExpense(item), item.currency)}</option>)}</select></label>
-    <label><span>Fecha del pago</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-    <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
-    <label><span>Monto pagado</span><FormattedAmountInput required value={amount} setValue={setAmount} /></label>
-    <div className="field"><span>Moneda del pago</span><CurrencyFields currency={currency} setCurrency={setCurrency} /></div>
-    {expense && amount && <div className="conversion-note span-2">Se descontarán <b>{expense.currency === currency ? money(Number(amount), expense.currency) : expense.currency === "ARS" ? money(Number(amount) * rate, "ARS") : money(Number(amount) / rate, "USD")}</b> del saldo, con la cotización de hoy.</div>}
-    <FormActions close={close} label="Guardar pago" />
+    <label className="span-2"><span>Costo a pagar</span><select required value={expenseId} onChange={(event) => selectExpense(event.target.value)}><option value="">Elegir costo…</option>{data.expenses.filter((item) => remainingForExpense(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{item.description || data.categories.find((category) => category.id === item.categoryId)?.name || "Costo"} · resta {money(remainingForExpense(item), item.currency)}</option>)}</select></label>
+    {expense && !partial && <div className="full-payment-choice span-2"><div><span>Saldo pendiente</span><b>{money(remainingForExpense(expense), expense.currency)}</b></div><button type="button" className="primary-button" onClick={payFull}>Registrar pago total</button><button type="button" className="text-button" onClick={() => setPartial(true)}>Registrar pago parcial</button></div>}
+    {expense && partial && <><label><span>Fecha del pago</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+      <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
+      <label><span>Monto pagado</span><FormattedAmountInput required value={amount} setValue={setAmount} /></label>
+      <div className="field"><span>Moneda del pago</span><CurrencyFields currency={currency} setCurrency={setCurrency} /></div>
+      {amount && <div className="conversion-note span-2">Se descontarán <b>{expense.currency === currency ? money(Number(amount), expense.currency) : expense.currency === "ARS" ? money(Number(amount) * rate, "ARS") : money(Number(amount) / rate, "USD")}</b> del saldo, con la cotización de hoy.</div>}
+      <div className="form-actions span-2"><button type="button" className="secondary-button" onClick={() => setPartial(false)}>Volver</button><button className="primary-button" type="submit">Guardar pago parcial</button></div></>}
   </form></Modal>;
 }
 

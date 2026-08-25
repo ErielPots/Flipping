@@ -222,6 +222,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .inline-payment-complete > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: white; font-weight: 900; }
 .inline-payment-complete b, .inline-payment-complete small { display: block; }
 .inline-payment-complete small { margin-top: 3px; color: #547065; }
+.full-payment-choice { display: flex; align-items: center; gap: 10px; padding: 14px; border: 1px solid #9ccab5; border-radius: 11px; background: var(--green-soft); }
+.full-payment-choice > div { display: grid; gap: 4px; margin-right: auto; }
+.full-payment-choice span { color: #547065; text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
+.full-payment-choice b { color: var(--green); font-size: 17px; }
+.inline-payment-back { grid-column: 1 / -1; justify-self: start; }
 .filtered-empty { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 10px; background: #f5f7f6; border: 2px dashed #aab7b0; border-radius: 16px; color: var(--muted); }
 .payment-sheet-section > h2 { margin: 0 0 13px; font-size: 18px; }
 .payment-history-mobile { display: none; }
@@ -547,5 +552,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .expense-detail-grid { grid-template-columns: 1fr; }
   .inline-payment-form { grid-template-columns: 1fr; }
   .inline-payment-note { grid-column: 1; }
+  .full-payment-choice { display: grid; }
+  .full-payment-choice > div { margin-right: 0; }
   .bottom-nav button small { font-size: 8px; }
 }
