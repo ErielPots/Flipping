@@ -403,6 +403,12 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .form-grid input:focus, .form-grid select:focus { border-color: var(--blue); background: white; box-shadow: 0 0 0 3px rgba(23,107,135,.15); }
 .form-grid input[aria-invalid="true"] { border-color: var(--red); background: var(--red-soft); }
 .form-grid input:disabled, .form-grid select:disabled { border-color: #b8c2bd; background: #cdd5d1; color: #6d7b74; cursor: not-allowed; }
+.date-input { position: relative; display: block; }
+.date-input input { position: relative; z-index: 1; }
+.date-input.is-today input { color: transparent; }
+.date-input.is-today input::-webkit-datetime-edit { color: transparent; }
+.date-input.is-today input::-webkit-calendar-picker-indicator { opacity: 1; }
+.date-today-label { position: absolute; z-index: 2; top: 50%; left: 12px; transform: translateY(-50%); color: var(--ink); font-size: 14px; pointer-events: none; }
 .calculated-own-capital { display: grid; gap: 5px; padding: 14px; border: 1px solid #9fc3cf; border-radius: 11px; background: var(--blue-soft); }
 .calculated-own-capital > span { color: var(--blue-dark); text-transform: uppercase; letter-spacing: .05em; font-size: 9px; font-weight: 900; }
 .calculated-own-capital strong { color: var(--blue-dark); font-size: 19px; }
