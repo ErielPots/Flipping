@@ -421,6 +421,25 @@ export function ControlObraApp() {
     return id;
   };
 
+  const deleteExpense = (expense: Expense) => {
+    const relatedPayments = data.payments.filter((payment) => payment.expenseId === expense.id);
+    const detail = relatedPayments.length ? ` También se eliminarán ${relatedPayments.length} pago${relatedPayments.length === 1 ? "" : "s"} registrado${relatedPayments.length === 1 ? "" : "s"}.` : "";
+    if (!window.confirm(`¿Eliminar este costo? Esta acción no se puede deshacer.${detail}`)) return;
+    setData((current) => ({
+      ...current,
+      expenses: current.expenses.filter((item) => item.id !== expense.id),
+      payments: current.payments.filter((payment) => payment.expenseId !== expense.id),
+    }));
+    setExpandedExpenseId("");
+    notify("Costo eliminado");
+  };
+
+  const deletePayment = (payment: Payment) => {
+    if (!window.confirm(`¿Eliminar el pago de ${money(payment.amount, payment.currency)} del ${shortDate(payment.date)}? Esta acción no se puede deshacer.`)) return;
+    setData((current) => ({ ...current, payments: current.payments.filter((item) => item.id !== payment.id) }));
+    notify("Pago eliminado");
+  };
+
   const renderHome = () => {
     const plan = data.investmentPlan;
     const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
@@ -501,6 +520,7 @@ export function ControlObraApp() {
       rate={rate}
       remaining={remaining}
       edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
+      remove={() => deleteExpense(expense)}
       close={() => setExpandedExpenseId("")}
       save={(payment) => {
         setData((current) => ({ ...current, payments: [...current.payments, payment] }));
@@ -510,7 +530,7 @@ export function ControlObraApp() {
     />;
 
     return <div className="page-content">
-      <PageHeading eyebrow="Movimientos" title="Costos" copy="Tocá una fila para ver detalles y acciones." action="Ingresar costo" onAction={() => setModal("expense")} />
+      <SimpleHeading title="Costos de remodelación" action="Ingresar costo" onAction={() => setModal("expense")} />
       {remodelBudget > 0 ? <section className={`cost-budget-comparison ${remodelDifference > 0.005 ? "over" : "under"}`}>
         <div><span>Presupuesto proyectado de remodelación</span><strong>{money(remodelBudget, "USD")}</strong></div>
         <div><span>Costos reales registrados</span><strong>{money(totals.committedUsd, "USD")}</strong></div>
@@ -581,6 +601,7 @@ export function ControlObraApp() {
       rate={rate}
       remaining={remaining}
       edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
+      remove={() => deleteExpense(expense)}
       close={() => setExpandedExpenseId("")}
       save={(payment) => {
         setData((current) => ({ ...current, payments: [...current.payments, payment] }));
@@ -589,10 +610,9 @@ export function ControlObraApp() {
       }}
     />;
     return <div className="page-content">
-      <PageHeading eyebrow="Movimientos" title="Pagos" copy="Tocá una fila para registrar un pago total o parcial." />
+      <SimpleHeading title="Pagos realizados" />
       {pending.length === 0 ? <EmptyState icon="✓" title="No hay pagos pendientes" copy="Los costos pendientes aparecerán acá." /> : (
         <section className="payment-sheet-section">
-          <h2>Costos y saldos</h2>
           <div className="expense-sheet-wrap expense-desktop-view">
             <table className="expense-sheet payment-sheet">
               <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Saldo</th></tr></thead>
@@ -623,14 +643,14 @@ export function ControlObraApp() {
           })}</div>
         </section>
       )}
-      {data.payments.length > 0 && <section className="history-section"><div className="section-title"><div><h2>Pagos realizados</h2></div></div>
-        <div className="expense-sheet-wrap payment-history-desktop"><table className="expense-sheet payment-history-sheet"><thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Detalle</th><th className="number-cell">Monto pagado</th></tr></thead><tbody>{data.payments.slice().reverse().map((payment) => {
+      {data.payments.length > 0 && <section className="history-section">
+        <div className="expense-sheet-wrap payment-history-desktop"><table className="expense-sheet payment-history-sheet"><thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Detalle</th><th className="number-cell">Monto pagado</th><th /></tr></thead><tbody>{data.payments.slice().reverse().map((payment) => {
           const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <tr key={payment.id}><td className="date-cell">{shortDate(payment.date)}</td><td><b>{expense ? categoryName(expense.categoryId) : "Costo"}</b></td><td>{expense ? subcategoryName(expense.subcategoryId) || "—" : "—"}</td><td>{payment.description || "Pago registrado"}</td><td className="number-cell paid-cell"><b>{money(payment.amount, payment.currency)}</b></td></tr>;
+          return <tr key={payment.id}><td className="date-cell">{shortDate(payment.date)}</td><td><b>{expense ? categoryName(expense.categoryId) : "Costo"}</b></td><td>{expense ? subcategoryName(expense.subcategoryId) || "—" : "—"}</td><td>{payment.description || "Pago registrado"}</td><td className="number-cell paid-cell"><b>{money(payment.amount, payment.currency)}</b></td><td className="payment-delete-cell"><button className="danger-button compact" onClick={() => deletePayment(payment)}>Eliminar</button></td></tr>;
         })}</tbody></table></div>
         <div className="payment-history-mobile">{data.payments.slice().reverse().map((payment) => {
           const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <article key={payment.id}><div><b>{expense ? pathName(expense.categoryId, expense.subcategoryId) : "Costo"}</b><time>{shortDate(payment.date)}</time></div><span>{payment.description || "Pago registrado"}</span><strong>{money(payment.amount, payment.currency)}</strong></article>;
+          return <article key={payment.id}><div><b>{expense ? pathName(expense.categoryId, expense.subcategoryId) : "Costo"}</b><time>{shortDate(payment.date)}</time></div><span>{payment.description || "Pago registrado"}</span><strong>{money(payment.amount, payment.currency)}</strong><button className="danger-button compact" onClick={() => deletePayment(payment)}>Eliminar</button></article>;
         })}</div>
       </section>}
     </div>;
@@ -699,9 +719,7 @@ export function ControlObraApp() {
     const investorCapital = investorCapitalTotal;
     const investorProfit = data.investors.reduce((sum, investor) => sum + investor.profitUsd, 0);
     const calculatedOwnCapital = Math.max(0, propertyCostWithCommission(plan.propertyValueUsd) + plan.remodelBudgetUsd - investorCapital);
-    const effectiveOwnCapital = plan.ownCapitalManual ? plan.ownCapitalUsd : calculatedOwnCapital;
-    const ownCapitalDifference = effectiveOwnCapital - calculatedOwnCapital;
-    const ownCapitalMismatch = plan.ownCapitalManual && Math.abs(ownCapitalDifference) > 0.005;
+    const effectiveOwnCapital = calculatedOwnCapital;
     const ownerProfit = plan.projectedSalePriceUsd > 0 ? plan.projectedSalePriceUsd - investorCapital - investorProfit - effectiveOwnCapital : 0;
     const ownReturnPercent = effectiveOwnCapital ? (ownerProfit / effectiveOwnCapital) * 100 : 0;
     const ownTermDays = plan.purchaseDate && plan.projectedSaleDate
@@ -710,16 +728,17 @@ export function ControlObraApp() {
     const ownAnnualRate = ownTermDays && ownTermDays > 0 ? ownReturnPercent * (365 / ownTermDays) : null;
     const ownRateStatus = !effectiveOwnCapital ? "Sin aporte" : !plan.projectedSaleDate ? "Falta fecha de venta" : !plan.purchaseDate ? "Falta fecha de compra" : !ownTermDays || ownTermDays <= 0 ? "Revisar fechas" : "Calculada";
     return <div className="page-content">
-      <PageHeading eyebrow="Financiamiento" title="Inversores" copy="Aportes y rendimiento." action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
+      <SimpleHeading title="Inversores" action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
 
-      <section className="funding-summary-grid">
-        <article className={ownCapitalMismatch ? "mismatch" : ""}><span>Aporte propio</span><strong>{money(effectiveOwnCapital, "USD")}</strong><small>{plan.ownCapitalManual ? "Valor informado manualmente" : "Calculado automáticamente"}</small></article>
+      <section className="funding-group"><span className="funding-group-label">Capital propio</span><div className="funding-summary-grid own-funding-summary">
+        <article><span>Capital propio calculado</span><strong>{money(effectiveOwnCapital, "USD")}</strong><small>{plan.ownCapitalManual ? `Estimado informado: ${money(plan.ownCapitalUsd, "USD")}` : "Calculado automáticamente"}</small></article>
+        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada propia</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Según venta proyectada" : "Falta cargar el precio de venta"}</small></article>
+      </div></section>
+      <section className="funding-group"><span className="funding-group-label">Inversores</span><div className="funding-summary-grid investor-funding-summary">
         <article><span>Capital de inversores</span><strong>{money(investorCapital, "USD")}</strong></article>
-        <article><span>Ganancia pactada</span><strong>{money(investorProfit, "USD")}</strong></article>
-        <article><span>Total a devolver</span><strong>{money(investorCapital + investorProfit, "USD")}</strong></article>
-        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada del aporte propio</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Después de la inversión y devolución a inversores" : "Falta cargar el precio de venta"}</small></article>
-      </section>
-      {ownCapitalMismatch && <div className="investment-alert error"><b>⚠ El aporte propio informado no coincide.</b><span>Según propiedad con comisiones + remodelación proyectada − inversores debería ser {money(calculatedOwnCapital, "USD")}. La diferencia es {money(Math.abs(ownCapitalDifference), "USD")}.</span><button className="text-button" onClick={() => setModal("investmentPlan")}>Revisar aporte</button></div>}
+        <article><span>Ganancia pactada de inversores</span><strong>{money(investorProfit, "USD")}</strong></article>
+        <article><span>Total a devolver a inversores</span><strong>{money(investorCapital + investorProfit, "USD")}</strong></article>
+      </div></section>
 
       <><div className="investor-sheet-wrap investor-desktop-view">
         <table className="investor-sheet">
@@ -728,7 +747,7 @@ export function ControlObraApp() {
             <Fragment><tr className={`investor-data-row own-capital-row ${expandedInvestorId === "own-capital" ? "expanded" : ""}`} tabIndex={0} aria-expanded={expandedInvestorId === "own-capital"} onClick={() => setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital")} onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital"); }
             }}>
-              <td><b>Aporte propio</b><small>Fila fija</small></td>
+              <td><b>Capital propio calculado</b><small>Fila fija</small></td>
               <td>{plan.purchaseDate ? shortDate(plan.purchaseDate) : "—"}</td>
               <td className="number-cell"><b>{money(effectiveOwnCapital, "USD")}</b></td>
               <td className="number-cell profit-cell"><b>{money(ownerProfit, "USD")}</b></td>
@@ -759,7 +778,7 @@ export function ControlObraApp() {
       <div className="investor-mobile-list">
         <article className={`investor-mobile-card own-capital-card ${expandedInvestorId === "own-capital" ? "expanded" : ""}`}>
           <button type="button" className="investor-mobile-summary" aria-expanded={expandedInvestorId === "own-capital"} onClick={() => setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital")}>
-            <div><b>Aporte propio</b><small>Fila fija</small></div>
+            <div><b>Capital propio calculado</b><small>Fila fija</small></div>
             <span>Monto <b>{money(effectiveOwnCapital, "USD")}</b></span>
             <span>Tasa anual <b>{ownAnnualRate === null ? ownRateStatus : percent(ownAnnualRate)}</b></span>
           </button>
@@ -889,6 +908,10 @@ function PageHeading({ eyebrow, title, copy, action, onAction }: { eyebrow: stri
   return <header className="page-heading"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{copy}</p></div>{action && <button className="primary-button large" onClick={onAction}>＋ {action}</button>}</header>;
 }
 
+function SimpleHeading({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+  return <header className="simple-heading"><h1>{title}</h1>{action && <button className="primary-button large" onClick={onAction}>＋ {action}</button>}</header>;
+}
+
 function EmptyState({ icon, title, copy, action, onAction }: { icon: string; title: string; copy: string; action?: string; onAction?: () => void }) {
   return <div className="empty-state"><span>{icon}</span><h2>{title}</h2><p>{copy}</p>{action && <button className="primary-button" onClick={onAction}>＋ {action}</button>}</div>;
 }
@@ -937,7 +960,7 @@ function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCate
   </form></Modal>;
 }
 
-function InlinePaymentForm({ expense, rate, remaining, edit, close, save }: { expense: Expense; rate: number; remaining: number; edit: () => void; close: () => void; save: (payment: Payment) => void }) {
+function InlinePaymentForm({ expense, rate, remaining, edit, remove, close, save }: { expense: Expense; rate: number; remaining: number; edit: () => void; remove: () => void; close: () => void; save: (payment: Payment) => void }) {
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -961,7 +984,7 @@ function InlinePaymentForm({ expense, rate, remaining, edit, close, save }: { ex
   return <div className="inline-payment-panel">
     <div className="expense-detail-head">
       <div className="expense-detail-grid"><div><span>Descripción</span><b>{expense.description || "Sin descripción"}</b></div><div><span>Responsable</span><b>{expense.responsible || "Sin responsable"}</b></div></div>
-      <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar costo</button><button type="button" className="icon-button" onClick={close} aria-label="Cerrar detalles">×</button></div>
+      <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar costo</button><button type="button" className="danger-button compact" onClick={remove}>Eliminar costo</button><button type="button" className="icon-button" onClick={close} aria-label="Cerrar detalles">×</button></div>
     </div>
     {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este costo ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : <form className="inline-payment-form" onSubmit={submit}>
       <label><span>Fecha del pago</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
@@ -1037,7 +1060,6 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
   const propertyCommission = (Number(propertyValue) || 0) * 0.03;
   const propertyTotal = propertyCostWithCommission(Number(propertyValue) || 0);
   const calculatedOwnCapital = Math.max(0, propertyTotal + (Number(remodelBudget) || 0) - investorCapitalUsd);
-  const manualDifference = (Number(ownCapital) || 0) - calculatedOwnCapital;
   return <Modal title="Datos de la inversión" close={close} wide><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
     save({ propertyValueUsd: Number(propertyValue) || 0, ownCapitalUsd: ownCapitalManual ? Number(ownCapital) || 0 : calculatedOwnCapital, ownCapitalManual, remodelBudgetUsd: Number(remodelBudget) || 0, projectedSalePriceUsd: Number(salePrice) || 0, purchaseDate, projectedSaleDate: saleDate });
@@ -1045,10 +1067,10 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
     <label><span>Valor de la propiedad (USD, sin comisiones)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label>
     <label><span>Fecha de compra de la propiedad</span><input type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} /></label>
     <div className="property-total-preview span-2"><span>Costo total de la propiedad</span><strong>{money(propertyTotal, "USD")}</strong><small>{money(Number(propertyValue) || 0, "USD")} valor + {money(propertyCommission, "USD")} comisiones (3%).</small></div>
-    <div className="calculated-own-capital span-2"><span>Aporte propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Propiedad con 3% de comisiones + remodelación proyectada − {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
-    <label className="manual-own-toggle span-2"><input type="checkbox" checked={ownCapitalManual} onChange={(event) => { setOwnCapitalManual(event.target.checked); if (event.target.checked && !ownCapital) setOwnCapital(calculatedOwnCapital.toString()); }} /><span>Ingresar un aporte propio diferente al cálculo automático</span></label>
-    {ownCapitalManual && <label className="span-2"><span>Aporte propio informado (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>}
-    {ownCapitalManual && Math.abs(manualDifference) > 0.005 && <div className="form-alert error span-2">⚠ No coincide con el cálculo automático. Hay una diferencia de <b>{money(Math.abs(manualDifference), "USD")}</b>.</div>}
+    <div className="calculated-own-capital span-2"><span>Capital propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Propiedad con 3% de comisiones + remodelación proyectada − {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
+    <label className="manual-own-toggle span-2"><input type="checkbox" checked={ownCapitalManual} onChange={(event) => { setOwnCapitalManual(event.target.checked); if (event.target.checked && !ownCapital) setOwnCapital(calculatedOwnCapital.toString()); }} /><span>Guardar un estimado de capital propio solo como referencia</span></label>
+    {ownCapitalManual && <label className="span-2"><span>Estimado de capital propio (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>}
+    {ownCapitalManual && <div className="source-note span-2"><span>Solo referencia</span><b>Los cálculos de ganancia y rendimiento seguirán usando el capital propio calculado automáticamente.</b></div>}
     <label><span>Presupuesto proyectado de remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>
     <label><span>Precio proyectado de venta (USD)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="USD" /></label>
     <label className="span-2"><span>Fecha proyectada de venta</span><input type="date" value={saleDate} onChange={(event) => setSaleDate(event.target.value)} /></label>
