@@ -272,8 +272,8 @@ function Modal({ title, close, children, wide = false }: { title: string; close:
 function CurrencyFields({ currency, setCurrency }: { currency: Currency; setCurrency: (value: Currency) => void }) {
   return (
     <div className="currency-toggle" aria-label="Moneda">
-      <button type="button" className={currency === "ARS" ? "active" : ""} onClick={() => setCurrency("ARS")}>ARS</button>
-      <button type="button" className={currency === "USD" ? "active" : ""} onClick={() => setCurrency("USD")}>USD</button>
+      <button type="button" className={`currency-ars ${currency === "ARS" ? "active" : ""}`} onClick={() => setCurrency("ARS")}>ARS</button>
+      <button type="button" className={`currency-usd ${currency === "USD" ? "active" : ""}`} onClick={() => setCurrency("USD")}>USD</button>
     </div>
   );
 }
