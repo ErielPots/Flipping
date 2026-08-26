@@ -708,7 +708,7 @@ export function ControlObraApp() {
           const cheapest = amounts.length ? Math.min(...amounts) : 0;
           const approved = group.offers.find((offer) => offer.id === group.approvedOfferId);
           return <section className="budget-group" key={group.id}>
-            <div className="budget-group-head"><div><span className="soft-label">{pathName(group.categoryId, group.subcategoryId)}</span><h2>{group.name}</h2></div><div className="budget-head-actions">{approved && <span className="approved-pill">✓ {approved.supplier}</span>}<button className="secondary-button" onClick={() => { setSelectedBudgetId(group.id); setModal("offer"); }}>＋ Agregar oferta</button></div></div>
+            <div className="budget-group-head"><div><span className="soft-label">{pathName(group.categoryId, group.subcategoryId)}</span><h2>{group.name}</h2></div><div className="budget-head-actions">{approved && <span className="approved-pill">✓ {approved.supplier}</span>}<button className="secondary-button" onClick={() => { setSelectedBudgetId(group.id); setModal("offer"); }}>＋ Agregar oferta</button><button className="danger-button compact" onClick={() => deleteBudgetGroup(group)}>Eliminar</button></div></div>
             {group.offers.length === 0 ? <div className="inline-empty">Todavía no hay ofertas en esta comparación.</div> : <div className="offers-grid">{group.offers.map((offer) => {
               const ars = toArs(offer.amount, offer.currency, offer.rate);
               const isApproved = offer.id === group.approvedOfferId;
@@ -874,6 +874,14 @@ export function ControlObraApp() {
       expenses: [...current.expenses, expense],
     }));
     notify("Presupuesto aprobado y agregado a Costos");
+  };
+
+  const deleteBudgetGroup = (group: BudgetGroup) => {
+    const approved = group.offers.find((offer) => offer.id === group.approvedOfferId);
+    const note = approved ? " El costo aprobado ya registrado se conservará." : "";
+    if (!window.confirm(`¿Eliminar el presupuesto “${group.name}” y todas sus ofertas?${note}`)) return;
+    setData((current) => ({ ...current, budgetGroups: current.budgetGroups.filter((item) => item.id !== group.id) }));
+    notify("Presupuesto eliminado");
   };
 
   const renameItem = (collection: "categories" | "subcategories", item: Category) => {
