@@ -430,6 +430,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .rate-history > span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .rate-history > div { display: flex; justify-content: space-between; gap: 12px; color: #526159; font-size: 12px; }
 .rate-history b { color: var(--ink); }
+.financial-breakdown { display: grid; gap: 12px; margin: 16px 0; }
+.financial-breakdown > div { display: grid; gap: 6px; }
+.financial-breakdown span { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+.financial-breakdown span b { color: var(--ink); }
+.financial-breakdown small { color: var(--muted); font-size: 10px; }
 .amount-field { display: grid; gap: 7px; }
 .amount-field > span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 800; color: #5f6c65; }
 .amount-control { display: flex; align-items: stretch; gap: 10px; }

@@ -474,6 +474,13 @@ export function ControlObraApp() {
     const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
     const propertyCommissionUsd = plan.propertyValueUsd * (plan.propertyCommissionPercent / 100);
     const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent);
+    const progressBySubcategory = (name: string) => {
+      const items = data.expenses.filter((item) => subcategoryName(item.subcategoryId) === name);
+      const total = items.reduce((sum, item) => sum + toArs(item.amount, item.currency, item.rate), 0);
+      const paid = items.reduce((sum, item) => sum + toArs(paymentForExpense(item), item.currency, item.rate), 0);
+      return { total, paid, percent: total ? paid * 100 / total : 0 };
+    };
+    const labor = progressBySubcategory("Mano de obra"); const materials = progressBySubcategory("Materiales");
     return <div className="page-content home-view">
       <section className="welcome-row">
         <div><h1>Resumen de la obra</h1></div>
@@ -521,6 +528,7 @@ export function ControlObraApp() {
             <span><b>{money(totals.paidArs, "ARS")}</b> pagado</span>
             <span><b>{money(totals.remainingArs, "ARS")}</b> pendiente</span>
           </div>
+          <div className="financial-breakdown"><div><span>Mano de obra <b>{Math.round(labor.percent)}%</b></span><ProgressBar value={labor.percent} tone="blue" /><small>{money(labor.paid, "ARS")} de {money(labor.total, "ARS")}</small></div><div><span>Materiales <b>{Math.round(materials.percent)}%</b></span><ProgressBar value={materials.percent} tone="amber" /><small>{money(materials.paid, "ARS")} de {money(materials.total, "ARS")}</small></div></div>
           <button className="secondary-button full" onClick={() => quickOpen("payment", "payments")}>Registrar un pago</button>
         </article>
 
@@ -762,7 +770,7 @@ export function ControlObraApp() {
 
       <section className="funding-group"><span className="funding-group-label">Capital propio</span><div className="funding-summary-grid own-funding-summary">
         <article><span>Capital propio calculado</span><strong>{money(effectiveOwnCapital, "USD")}</strong><small>{plan.ownCapitalManual ? `Estimado informado: ${money(plan.ownCapitalUsd, "USD")}` : "Calculado automáticamente"}</small></article>
-        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia estimada propia</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Según venta proyectada" : "Falta cargar el precio de venta"}</small></article>
+        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia proyectada propia</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Según venta proyectada" : "Falta cargar el precio de venta"}</small></article>
       </div></section>
       <section className="funding-group"><span className="funding-group-label">Inversores</span><div className="funding-summary-grid investor-funding-summary">
         <article><span>Capital de inversores</span><strong>{money(investorCapital, "USD")}</strong></article>
@@ -1038,6 +1046,7 @@ function InlinePaymentForm({ expense, rate, remaining, edit, remove, close, save
   return <div className="inline-payment-panel">
     <div className="expense-detail-head">
       <div className="expense-detail-grid"><div><span>Descripción</span><b>{expense.description || "Sin descripción"}</b></div><div><span>Responsable</span><b>{expense.responsible || "Sin responsable"}</b></div></div>
+      <small className="expense-conversion">Equivale a {expense.currency === "ARS" ? money(expense.amount / expense.rate, "USD") : money(expense.amount * expense.rate, "ARS")}</small>
       <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar costo</button><button type="button" className="danger-button compact" onClick={remove}>Eliminar costo</button><button type="button" className="icon-button" onClick={close} aria-label="Cerrar detalles">×</button></div>
     </div>
     {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este costo ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : !partial ? <div className="full-payment-choice"><div><span>Saldo pendiente</span><b>{money(remaining, expense.currency)}</b></div><button type="button" className="primary-button" onClick={payFull}>Registrar pago total</button><button type="button" className="text-button" onClick={() => setPartial(true)}>Registrar pago parcial</button></div> : <form className="inline-payment-form" onSubmit={submit}>
