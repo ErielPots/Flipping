@@ -4,7 +4,7 @@ export async function GET() {
   try {
     const response = await fetch(BCRA_URL, {
       headers: { "Accept-Language": "es-AR" },
-      cf: { cacheTtl: 1800, cacheEverything: true },
+      cf: { cacheTtl: 300, cacheEverything: true },
     } as RequestInit);
 
     if (!response.ok) throw new Error("El BCRA no respondió.");

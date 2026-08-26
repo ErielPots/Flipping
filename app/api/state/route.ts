@@ -25,6 +25,7 @@ const INITIAL_STATE = {
   payments: [],
   progress: [],
   budgetGroups: [],
+  exchangeRateHistory: [],
 };
 
 async function ensureStateTable() {

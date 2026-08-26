@@ -426,6 +426,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .currency-toggle button { border: 0; border-radius: 8px; background: transparent; color: #3f5047; font-size: 12px; font-weight: 800; }
 .currency-toggle button.active { background: var(--blue); color: white; box-shadow: 0 2px 8px rgba(23,107,135,.25); }
 .currency-toggle button.active.currency-usd { background: var(--green); box-shadow: 0 2px 8px rgba(45,138,98,.25); }
+.rate-history { display: grid; gap: 7px; padding: 12px; border: 1px solid #b8c5be; border-radius: 11px; background: #e7ece9; }
+.rate-history > span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.rate-history > div { display: flex; justify-content: space-between; gap: 12px; color: #526159; font-size: 12px; }
+.rate-history b { color: var(--ink); }
 .amount-field { display: grid; gap: 7px; }
 .amount-field > span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 800; color: #5f6c65; }
 .amount-control { display: flex; align-items: stretch; gap: 10px; }

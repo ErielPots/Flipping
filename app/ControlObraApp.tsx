@@ -66,6 +66,7 @@ type InvestmentPlan = {
   purchaseDate: string;
   projectedSaleDate: string;
 };
+type ExchangeRateRecord = { date: string; rate: number; source: string };
 type AppState = {
   catalogVersion?: number;
   categories: Category[];
@@ -76,6 +77,7 @@ type AppState = {
   budgetGroups: BudgetGroup[];
   investors: Investor[];
   investmentPlan: InvestmentPlan;
+  exchangeRateHistory?: ExchangeRateRecord[];
 };
 type View = "home" | "expenses" | "payments" | "progress" | "budgets" | "categories" | "investors";
 type ModalName = "expense" | "payment" | "progress" | "budget" | "offer" | "rate" | "investor" | "contribution" | "investmentPlan" | null;
@@ -121,6 +123,7 @@ const initialState: AppState = {
   budgetGroups: [],
   investors: [],
   investmentPlan: emptyInvestmentPlan,
+  exchangeRateHistory: [],
 };
 
 function normalizeState(candidate: AppState | undefined): AppState {
@@ -140,6 +143,9 @@ function normalizeState(candidate: AppState | undefined): AppState {
       propertyCommissionPercent: Number.isFinite(savedPlan?.propertyCommissionPercent) ? savedPlan.propertyCommissionPercent : 3,
       ownCapitalManual: savedPlan?.ownCapitalManual ?? Boolean(savedPlan?.ownCapitalUsd),
     },
+    exchangeRateHistory: Array.isArray(candidate.exchangeRateHistory)
+      ? candidate.exchangeRateHistory.filter((item) => item?.date && Number.isFinite(item?.rate))
+      : [],
   };
   if ((candidate.catalogVersion ?? 0) >= 2) return { ...candidate, ...investmentState };
 
@@ -205,6 +211,10 @@ const toArs = (amount: number, currency: Currency, rate: number) =>
 const toUsd = (amount: number, currency: Currency, rate: number) =>
   currency === "USD" ? amount : amount / rate;
 const propertyCostWithCommission = (propertyValueUsd: number, commissionPercent = 3) => propertyValueUsd * (1 + commissionPercent / 100);
+const updateRateHistory = (history: ExchangeRateRecord[], next: ExchangeRateRecord) => [
+  ...history.filter((item) => item.date !== next.date),
+  { ...next, date: next.date.slice(0, 10) },
+].sort((left, right) => right.date.localeCompare(left.date));
 const percent = (value: number) => `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value)}%`;
 const contributionInUsd = (contribution: InvestorContribution) => toUsd(contribution.amount, contribution.currency ?? "USD", contribution.rate ?? 1500);
 const investorMetrics = (investor: Investor, projectedSaleDate: string) => {
@@ -310,10 +320,14 @@ export function ControlObraApp() {
       fetch("/api/exchange-rate").then((response) => response.ok ? response.json() : Promise.reject()),
     ])
       .then(([stateResult, rateResult]) => {
-        setData(normalizeState(stateResult.state));
-        setRate(Number(rateResult.rate) || 1500);
-        setRateDate((rateResult.date ?? today()).slice(0, 10));
-        setRateSource(rateResult.source ?? "BCRA · promedio vendedor");
+        const savedState = normalizeState(stateResult.state);
+        const nextRate = Number(rateResult.rate) || 1500;
+        const nextDate = (rateResult.date ?? today()).slice(0, 10);
+        const nextSource = rateResult.source ?? "BCRA · promedio vendedor";
+        setData({ ...savedState, exchangeRateHistory: updateRateHistory(savedState.exchangeRateHistory ?? [], { date: nextDate, rate: nextRate, source: nextSource }) });
+        setRate(nextRate);
+        setRateDate(nextDate);
+        setRateSource(nextSource);
         setSaveStatus("saved");
       })
       .catch(async () => {
@@ -912,7 +926,7 @@ export function ControlObraApp() {
       {modal === "payment" && <PaymentModal data={data} rate={rate} initialExpenseId={selectedExpenseId} remainingForExpense={remainingForExpense} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedExpenseId(""); notify("Pago registrado"); }} />}
       {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
-      {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} close={() => setModal(null)} save={(nextRate, nextDate) => { setRate(nextRate); setRateDate(nextDate); setRateSource("Cotización ajustada manualmente"); setModal(null); notify("Cotización actualizada"); }} />}
+      {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} history={data.exchangeRateHistory ?? []} close={() => setModal(null)} save={(nextRate, nextDate) => { const nextSource = "Cotización ajustada manualmente"; setRate(nextRate); setRateDate(nextDate); setRateSource(nextSource); setData((current) => ({ ...current, exchangeRateHistory: updateRateHistory(current.exchangeRateHistory ?? [], { date: nextDate, rate: nextRate, source: nextSource }) })); setModal(null); notify("Cotización actualizada"); }} />}
       {modal === "investmentPlan" && <InvestmentPlanModal plan={data.investmentPlan} investorCapitalUsd={investorCapitalTotal} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
       {modal === "investor" && <InvestorModal rate={rate} investor={selectedInvestor} close={() => { setModal(null); setSelectedInvestorId(""); }} save={(investor) => {
         setData((current) => ({ ...current, investors: current.investors.some((item) => item.id === investor.id) ? current.investors.map((item) => item.id === investor.id ? investor : item) : [...current.investors, investor] }));
@@ -1163,12 +1177,13 @@ function ContributionModal({ investor, contribution, rate, remove, close, save }
   </form></Modal>;
 }
 
-function RateModal({ rate, date, source, close, save }: { rate: number; date: string; source: string; close: () => void; save: (rate: number, date: string) => void }) {
+function RateModal({ rate, date, source, history, close, save }: { rate: number; date: string; source: string; history: ExchangeRateRecord[]; close: () => void; save: (rate: number, date: string) => void }) {
   const [nextRate, setNextRate] = useState(rate.toString()); const [nextDate, setNextDate] = useState(date);
   return <Modal title="Cotización del dólar" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (Number(nextRate) < 1) return; save(Number(nextRate), nextDate); }}>
     <div className="source-note span-2"><span>Fuente actual</span><b>{source}</b><small>La aplicación consulta automáticamente el promedio vendedor del BCRA.</small></div>
     <label><span>Pesos por dólar</span><FormattedAmountInput required value={nextRate} setValue={setNextRate} /></label>
     <label><span>Fecha de cotización</span><DateInput required value={nextDate} setValue={setNextDate} /></label>
+    {history.length > 0 && <div className="rate-history span-2"><span>Historial de cotizaciones</span>{history.slice(0, 8).map((item) => <div key={item.date}><time>{shortDate(item.date)}</time><b>{money(item.rate, "ARS")}</b></div>)}</div>}
     <FormActions close={close} label="Usar esta cotización" />
   </form></Modal>;
 }
