@@ -1,4 +1,4 @@
-const BCRA_URL = "https://api.bcra.gob.ar/estadisticas/v2.0/principalesvariables";
+const BCRA_URL = "https://api.bcra.gob.ar/estadisticascambiarias/v1.0/Cotizaciones/USD";
 
 export async function GET() {
   try {
@@ -9,15 +9,16 @@ export async function GET() {
 
     if (!response.ok) throw new Error("El BCRA no respondió.");
     const payload = (await response.json()) as {
-      results?: Array<{ idVariable: number; descripcion: string; fecha: string; valor: number }>;
+      results?: Array<{ fecha: string; detalle?: Array<{ codigoMoneda: string; tipoCotizacion: number }> }>;
     };
-    const official = payload.results?.find((item) => item.idVariable === 4);
-    if (!official) throw new Error("No se encontró la cotización oficial.");
+    const official = payload.results?.[0];
+    const quote = official?.detalle?.find((item) => item.codigoMoneda === "USD")?.tipoCotizacion;
+    if (!official || !quote) throw new Error("No se encontró la cotización oficial.");
 
     return Response.json({
-      rate: Number(official.valor),
+      rate: Number(quote),
       date: official.fecha,
-      source: "BCRA · promedio vendedor",
+      source: "BCRA · dólar oficial",
     });
   } catch (error) {
     return Response.json(

@@ -323,7 +323,7 @@ export function ControlObraApp() {
         const savedState = normalizeState(stateResult.state);
         const nextRate = Number(rateResult.rate) || 1500;
         const nextDate = (rateResult.date ?? today()).slice(0, 10);
-        const nextSource = rateResult.source ?? "BCRA · promedio vendedor";
+        const nextSource = rateResult.source ?? "BCRA · dólar oficial";
         setData({ ...savedState, exchangeRateHistory: updateRateHistory(savedState.exchangeRateHistory ?? [], { date: nextDate, rate: nextRate, source: nextSource }) });
         setRate(nextRate);
         setRateDate(nextDate);
@@ -1180,7 +1180,7 @@ function ContributionModal({ investor, contribution, rate, remove, close, save }
 function RateModal({ rate, date, source, history, close, save }: { rate: number; date: string; source: string; history: ExchangeRateRecord[]; close: () => void; save: (rate: number, date: string) => void }) {
   const [nextRate, setNextRate] = useState(rate.toString()); const [nextDate, setNextDate] = useState(date);
   return <Modal title="Cotización del dólar" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (Number(nextRate) < 1) return; save(Number(nextRate), nextDate); }}>
-    <div className="source-note span-2"><span>Fuente actual</span><b>{source}</b><small>La aplicación consulta automáticamente el promedio vendedor del BCRA.</small></div>
+    <div className="source-note span-2"><span>Fuente actual</span><b>{source}</b><small>La aplicación consulta automáticamente el dólar oficial publicado por el BCRA.</small></div>
     <label><span>Pesos por dólar</span><FormattedAmountInput required value={nextRate} setValue={setNextRate} /></label>
     <label><span>Fecha de cotización</span><DateInput required value={nextDate} setValue={setNextDate} /></label>
     {history.length > 0 && <div className="rate-history span-2"><span>Historial de cotizaciones</span>{history.slice(0, 8).map((item) => <div key={item.date}><time>{shortDate(item.date)}</time><b>{money(item.rate, "ARS")}</b></div>)}</div>}
