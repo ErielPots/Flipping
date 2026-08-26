@@ -308,6 +308,7 @@ export function ControlObraApp() {
   const [selectedContributionId, setSelectedContributionId] = useState<string>("");
   const [expandedInvestorId, setExpandedInvestorId] = useState<string>("");
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<string>("all");
+  const [investmentField, setInvestmentField] = useState<"property" | "remodel" | "sale">("property");
   const [rate, setRate] = useState(1500);
   const [rateDate, setRateDate] = useState(today());
   const [rateSource, setRateSource] = useState("Cotización manual");
@@ -480,11 +481,11 @@ export function ControlObraApp() {
       </section>
 
       <section className="investment-plan-panel home-plan-panel">
-        <div className="investment-plan-head"><div><h2>Inversión y venta</h2></div><button className="secondary-button" onClick={() => setModal("investmentPlan")}>Editar valores</button></div>
+        <div className="investment-plan-head"><div><h2>Inversión y venta</h2></div></div>
         <div className="investment-plan-grid">
-          <article className="clickable-property-card" tabIndex={0} role="button" onClick={() => setModal("investmentPlan")} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setModal("investmentPlan"); } }}><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{money(plan.propertyValueUsd, "USD")} + {money(propertyCommissionUsd, "USD")} en comisiones ({percent(plan.propertyCommissionPercent)})</small><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"} · tocar para editar</small></article>
-          <article className={plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : "Dentro de lo proyectado"}</small></article>
-          <article className="sale"><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
+          <article className="clickable-property-card" tabIndex={0} role="button" onClick={() => { setInvestmentField("property"); setModal("investmentPlan"); }}><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{money(plan.propertyValueUsd, "USD")} + {money(propertyCommissionUsd, "USD")} en comisiones ({percent(plan.propertyCommissionPercent)})</small><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"} · tocar para editar</small></article>
+          <article className={`clickable-property-card ${plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}`} tabIndex={0} role="button" onClick={() => { setInvestmentField("remodel"); setModal("investmentPlan"); }}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : "Dentro de lo proyectado"}</small></article>
+          <article className="sale clickable-property-card" tabIndex={0} role="button" onClick={() => { setInvestmentField("sale"); setModal("investmentPlan"); }}><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
         </div>
       </section>
 
@@ -941,7 +942,7 @@ export function ControlObraApp() {
       {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} history={data.exchangeRateHistory ?? []} close={() => setModal(null)} save={(nextRate, nextDate) => { const nextSource = "Cotización ajustada manualmente"; setRate(nextRate); setRateDate(nextDate); setRateSource(nextSource); setData((current) => ({ ...current, exchangeRateHistory: updateRateHistory(current.exchangeRateHistory ?? [], { date: nextDate, rate: nextRate, source: nextSource }) })); setModal(null); notify("Cotización actualizada"); }} />}
-      {modal === "investmentPlan" && <InvestmentPlanModal plan={data.investmentPlan} investorCapitalUsd={investorCapitalTotal} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
+      {modal === "investmentPlan" && <InvestmentPlanModal field={investmentField} plan={data.investmentPlan} investorCapitalUsd={investorCapitalTotal} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
       {modal === "investor" && <InvestorModal rate={rate} investor={selectedInvestor} close={() => { setModal(null); setSelectedInvestorId(""); }} save={(investor) => {
         setData((current) => ({ ...current, investors: current.investors.some((item) => item.id === investor.id) ? current.investors.map((item) => item.id === investor.id ? investor : item) : [...current.investors, investor] }));
         setModal(null); setSelectedInvestorId(""); notify("Inversor guardado");
@@ -1107,7 +1108,7 @@ function OfferModal({ rate, group, close, save }: { rate: number; group?: Budget
   </form></Modal>;
 }
 
-function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: InvestmentPlan; investorCapitalUsd: number; close: () => void; save: (plan: InvestmentPlan) => void }) {
+function InvestmentPlanModal({ field, plan, investorCapitalUsd, close, save }: { field: "property" | "remodel" | "sale"; plan: InvestmentPlan; investorCapitalUsd: number; close: () => void; save: (plan: InvestmentPlan) => void }) {
   const [propertyValue, setPropertyValue] = useState(plan.propertyValueUsd ? plan.propertyValueUsd.toString() : "");
   const [propertyCommissionPercent, setPropertyCommissionPercent] = useState(plan.propertyCommissionPercent.toString());
   const [ownCapital, setOwnCapital] = useState(plan.ownCapitalUsd ? plan.ownCapitalUsd.toString() : "");
@@ -1120,21 +1121,18 @@ function InvestmentPlanModal({ plan, investorCapitalUsd, close, save }: { plan: 
   const propertyCommission = (Number(propertyValue) || 0) * (commissionPercent / 100);
   const propertyTotal = propertyCostWithCommission(Number(propertyValue) || 0, commissionPercent);
   const calculatedOwnCapital = Math.max(0, propertyTotal + (Number(remodelBudget) || 0) - investorCapitalUsd);
-  return <Modal title="Datos de la inversión" close={close} wide><form className="form-grid" onSubmit={(event) => {
+  const titles = { property: "Valor de la propiedad", remodel: "Remodelación proyectada", sale: "Venta proyectada" };
+  return <Modal title={titles[field]} close={close} wide><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
     save({ propertyValueUsd: Number(propertyValue) || 0, propertyCommissionPercent: commissionPercent, ownCapitalUsd: ownCapitalManual ? Number(ownCapital) || 0 : calculatedOwnCapital, ownCapitalManual, remodelBudgetUsd: Number(remodelBudget) || 0, projectedSalePriceUsd: Number(salePrice) || 0, purchaseDate, projectedSaleDate: saleDate });
   }}>
-    <label><span>Valor de la propiedad (USD, sin comisiones)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label>
-    <label><span>Comisiones (%)</span><input type="number" min="0" step="0.1" value={propertyCommissionPercent} onChange={(event) => setPropertyCommissionPercent(event.target.value)} /></label>
-    <label><span>Fecha de compra de la propiedad</span><DateInput value={purchaseDate} setValue={setPurchaseDate} /></label>
-    <div className="property-total-preview span-2"><span>Costo total de la propiedad</span><strong>{money(propertyTotal, "USD")}</strong><small>{money(Number(propertyValue) || 0, "USD")} valor + {money(propertyCommission, "USD")} comisiones ({percent(commissionPercent)}).</small></div>
+    {field === "property" && <><label><span>Valor de la propiedad (USD, sin comisiones)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label><label><span>Comisiones (%)</span><input type="number" min="0" step="0.1" value={propertyCommissionPercent} onChange={(event) => setPropertyCommissionPercent(event.target.value)} /></label><label><span>Fecha de compra de la propiedad</span><DateInput value={purchaseDate} setValue={setPurchaseDate} /></label><div className="property-total-preview span-2"><span>Costo total de la propiedad</span><strong>{money(propertyTotal, "USD")}</strong><small>{money(Number(propertyValue) || 0, "USD")} valor + {money(propertyCommission, "USD")} comisiones ({percent(commissionPercent)}).</small></div></>}
     <div className="calculated-own-capital span-2"><span>Capital propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Propiedad con {percent(commissionPercent)} de comisiones + remodelación proyectada − {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
     <label className="manual-own-toggle span-2"><input type="checkbox" checked={ownCapitalManual} onChange={(event) => { setOwnCapitalManual(event.target.checked); if (event.target.checked && !ownCapital) setOwnCapital(calculatedOwnCapital.toString()); }} /><span>Guardar un estimado de capital propio solo como referencia</span></label>
     {ownCapitalManual && <label className="span-2"><span>Estimado de capital propio (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>}
     {ownCapitalManual && <div className="source-note span-2"><span>Solo referencia</span><b>Los cálculos de ganancia y rendimiento seguirán usando el capital propio calculado automáticamente.</b></div>}
-    <label><span>Presupuesto proyectado de remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>
-    <label><span>Precio proyectado de venta (USD)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="USD" /></label>
-    <label className="span-2"><span>Fecha proyectada de venta</span><DateInput value={saleDate} setValue={setSaleDate} /></label>
+    {field === "remodel" && <label className="span-2"><span>Presupuesto proyectado de remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>}
+    {field === "sale" && <><label><span>Precio proyectado de venta (USD)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="USD" /></label><label><span>Fecha proyectada de venta</span><DateInput value={saleDate} setValue={setSaleDate} /></label></>}
     <div className="source-note span-2"><span>Dato automático</span><b>Los costos reales se calculan desde la pantalla Costos.</b></div>
     <FormActions close={close} label="Guardar valores" />
   </form></Modal>;
