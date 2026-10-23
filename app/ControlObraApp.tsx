@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Fragment, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 type Currency = "ARS" | "USD";
 type Category = { id: string; name: string; archived: boolean; subcategoryIds?: string[] };
@@ -46,6 +46,19 @@ type BudgetGroup = {
   offers: BudgetOffer[];
   approvedOfferId?: string;
 };
+// Partida del presupuesto general de la obra (lo que se piensa gastar por rubro y tipo).
+type BudgetItem = {
+  id: string;
+  categoryId: string;
+  subcategoryId: string;
+  description: string;
+  amount: number;
+  currency: Currency;
+  rate: number;
+  comparisonId?: string;
+};
+// Algo que se puede pagar (hoy, una línea del presupuesto).
+type Payable = { id: string; amount: number; currency: Currency; description: string; responsible?: string };
 type InvestorContribution = { id: string; date: string; amount: number; currency?: Currency; rate?: number };
 type Investor = {
   id: string;
@@ -66,6 +79,7 @@ type InvestmentPlan = {
   purchaseDate: string;
   projectedSaleDate: string;
 };
+type PlanField = "property" | "remodel" | "sale" | "own";
 type ExchangeRateRecord = { date: string; rate: number; source: string };
 type AppState = {
   catalogVersion?: number;
@@ -75,12 +89,13 @@ type AppState = {
   payments: Payment[];
   progress: ProgressItem[];
   budgetGroups: BudgetGroup[];
+  budgetItems?: BudgetItem[];
   investors: Investor[];
   investmentPlan: InvestmentPlan;
   exchangeRateHistory?: ExchangeRateRecord[];
 };
-type View = "home" | "expenses" | "progress" | "budgets" | "categories" | "investors";
-type ModalName = "expense" | "payment" | "progress" | "budget" | "offer" | "rate" | "investor" | "contribution" | "investmentPlan" | null;
+type View = "home" | "payments" | "progress" | "budgets" | "categories" | "investors";
+type ModalName = "expense" | "payment" | "progress" | "budget" | "budgetItem" | "offer" | "rate" | "investor" | "contribution" | "investmentPlan" | null;
 
 const emptyInvestmentPlan: InvestmentPlan = {
   propertyValueUsd: 0,
@@ -121,6 +136,7 @@ const initialState: AppState = {
   payments: [],
   progress: [],
   budgetGroups: [],
+  budgetItems: [],
   investors: [],
   investmentPlan: emptyInvestmentPlan,
   exchangeRateHistory: [],
@@ -130,6 +146,21 @@ function normalizeState(candidate: AppState | undefined): AppState {
   if (!candidate?.categories || !candidate?.subcategories) return initialState;
   const savedPlan = candidate.investmentPlan;
   const investmentState = {
+    budgetItems: [
+      ...(Array.isArray(candidate.budgetItems) ? candidate.budgetItems : []),
+      // Los costos de la versión anterior pasan al presupuesto con el mismo id, así conservan sus pagos.
+      ...(Array.isArray(candidate.expenses) ? candidate.expenses : []).map((expense): BudgetItem => ({
+        id: expense.id,
+        categoryId: expense.categoryId,
+        subcategoryId: expense.subcategoryId,
+        description: [expense.description, expense.responsible].filter(Boolean).join(" · "),
+        amount: expense.amount,
+        currency: expense.currency,
+        rate: expense.rate,
+        comparisonId: expense.budgetGroupId,
+      })),
+    ],
+    expenses: [],
     investors: Array.isArray(candidate.investors) ? candidate.investors.map((investor) => ({
       ...investor,
       profitAmount: investor.profitAmount ?? investor.profitUsd,
@@ -215,6 +246,7 @@ const updateRateHistory = (history: ExchangeRateRecord[], next: ExchangeRateReco
   ...history.filter((item) => item.date !== next.date),
   { ...next, date: next.date.slice(0, 10) },
 ].sort((left, right) => right.date.localeCompare(left.date));
+const usdPlain = (value: number) => new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
 const percent = (value: number) => `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value)}%`;
 const contributionInUsd = (contribution: InvestorContribution) => toUsd(contribution.amount, contribution.currency ?? "USD", contribution.rate ?? 1500);
 const investorMetrics = (investor: Investor, projectedSaleDate: string) => {
@@ -254,13 +286,69 @@ function DateInput({ value, setValue, required = false, ariaLabel }: { value: st
   return <span className={`date-input ${isToday ? "is-today" : ""}`}><input aria-label={ariaLabel} required={required} type="date" value={value} onChange={(event) => setValue(event.target.value)} />{isToday && <span className="date-today-label">Hoy</span>}</span>;
 }
 
-type IconName = "home" | "expenses" | "budgets" | "investors";
+type IconName = "home" | "expenses" | "budgets" | "investors" | "plus" | "check";
 const iconPaths: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  check: <path d="m5 12.5 4.5 4.5L19 7" />,
   expenses: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></>,
   budgets: <><path d="M9 4h6v3H9z" /><path d="M7 5H5v16h14V5h-2" /><path d="M8.5 12h7M8.5 16h4.5" /></>,
   investors: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5" /><circle cx="17" cy="9" r="2.5" /><path d="M16.5 14.5c2.4.2 4.2 1.9 5 5" /></>,
 };
+
+// Cuadro tipo "mapa de calor" de acciones: rectángulos con área proporcional a cada valor (algoritmo squarified).
+type TreeRect = { x: number; y: number; w: number; h: number };
+const treemapBox: TreeRect = { x: 0, y: 0, w: 150, h: 100 };
+const treemapBoxNarrow: TreeRect = { x: 0, y: 0, w: 100, h: 130 };
+const narrowQuery = "(max-width: 620px)";
+const subscribeNarrow = (callback: () => void) => {
+  const query = window.matchMedia(narrowQuery);
+  query.addEventListener("change", callback);
+  return () => query.removeEventListener("change", callback);
+};
+function squarify(values: number[], box: TreeRect): TreeRect[] {
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return values.map(() => ({ ...box, w: 0, h: 0 }));
+  const areas = values.map((value) => (value / total) * box.w * box.h);
+  const rects: TreeRect[] = [];
+  let rest = { ...box };
+  let index = 0;
+  while (index < areas.length) {
+    const side = Math.min(rest.w, rest.h);
+    const worst = (row: number[]) => {
+      const sum = row.reduce((acc, value) => acc + value, 0);
+      return Math.max((side * side * Math.max(...row)) / (sum * sum), (sum * sum) / (side * side * Math.min(...row)));
+    };
+    const row = [areas[index]];
+    let next = index + 1;
+    while (next < areas.length && worst([...row, areas[next]]) <= worst(row)) row.push(areas[next++]);
+    const rowSum = row.reduce((acc, value) => acc + value, 0);
+    if (rest.w >= rest.h) {
+      const width = rowSum / rest.h;
+      let y = rest.y;
+      row.forEach((area) => { rects.push({ x: rest.x, y, w: width, h: area / width }); y += area / width; });
+      rest = { x: rest.x + width, y: rest.y, w: rest.w - width, h: rest.h };
+    } else {
+      const height = rowSum / rest.w;
+      let x = rest.x;
+      row.forEach((area) => { rects.push({ x, y: rest.y, w: area / height, h: height }); x += area / height; });
+      rest = { x: rest.x, y: rest.y + height, w: rest.w, h: rest.h - height };
+    }
+    index = next;
+  }
+  return rects;
+}
+
+// Texto blanco u oscuro, el que contraste más con el color de fondo.
+function readableTextOn(hex: string) {
+  const value = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255].map((channel) => {
+    const c = channel / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return 1.05 / (luminance + 0.05) >= (luminance + 0.05) / 0.063 ? "#ffffff" : "#1c1f1e";
+}
 
 function NavIcon({ name }: { name: IconName }) {
   return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{iconPaths[name]}</svg>;
@@ -268,10 +356,66 @@ function NavIcon({ name }: { name: IconName }) {
 
 const nav: Array<{ id: View; label: string; icon: IconName }> = [
   { id: "home", label: "Resumen", icon: "home" },
-  { id: "expenses", label: "Costos", icon: "expenses" },
-  { id: "budgets", label: "Presupuestos", icon: "budgets" },
+  { id: "budgets", label: "Presupuesto", icon: "budgets" },
+  { id: "payments", label: "Pagos", icon: "expenses" },
   { id: "investors", label: "Inversores", icon: "investors" },
 ];
+
+// Colores de categoría validados para daltonismo (ver skill dataviz); "Otros" va siempre en gris.
+const categoryColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+// Tipos (mano de obra / materiales / adicionales): tonos del color de la app, para no confundirse con las categorías.
+const typeColors: Record<string, string> = { "sub-mano-obra": "#10556c", "sub-materiales": "#3a8fae", "sub-adicionales": "#8cc3d6" };
+const otherColor = "#6b6a66";
+const trackColor = "#ecebe7";
+
+type ChartSlice = { key: string; label: string; value: number; color: string };
+type ChartCenter = { label: string; value: string; note?: string; tone?: "danger" };
+
+// Anillo con segmentos (montos en pesos). Al pasar el mouse o tocar un segmento o una fila
+// de la leyenda, se resalta y el centro muestra su monto.
+function RingChart({ slices, scale, center, legendExtra, ariaLabel }: { slices: ChartSlice[]; scale: number; center: ChartCenter; legendExtra?: ReactNode; ariaLabel: string }) {
+  const [hovered, setHovered] = useState("");
+  const radius = 80;
+  const circumference = 2 * Math.PI * radius;
+  const visible = slices.filter((slice) => slice.value > 0.5);
+  const gap = visible.length > 1 ? 2 : 0;
+  const lengths = visible.map((slice) => scale > 0 ? (slice.value / scale) * circumference : 0);
+  const arcs = visible.map((slice, index) => ({
+    slice,
+    length: Math.max(0, lengths[index] - gap),
+    offset: lengths.slice(0, index).reduce((sum, value) => sum + value, 0),
+  }));
+  const active = slices.find((slice) => slice.key === hovered);
+  return <div className="ring-chart">
+    <div className="ring-figure" onMouseLeave={() => setHovered("")}>
+      <svg viewBox="0 0 200 200" role="img" aria-label={ariaLabel}>
+        <circle cx="100" cy="100" r={radius} fill="none" stroke={trackColor} strokeWidth="26" />
+        {arcs.map(({ slice, length, offset }) => <circle
+          key={slice.key}
+          className={`ring-arc ${hovered && hovered !== slice.key ? "dimmed" : ""}`}
+          cx="100" cy="100" r={radius} fill="none" stroke={slice.color} strokeWidth="26"
+          strokeDasharray={`${length} ${circumference}`} strokeDashoffset={-offset}
+          transform="rotate(-90 100 100)"
+          onMouseEnter={() => setHovered(slice.key)}
+          onClick={() => setHovered(slice.key)}
+        />)}
+      </svg>
+      <div className={`ring-center ${!active && center.tone === "danger" ? "danger" : ""}`}>
+        {active ? <><span>{active.label}</span><strong className="ring-amount">{money(active.value, "ARS")}</strong>{scale > 0 && <small>{Math.round((active.value / scale) * 100)}% del total</small>}</> : <><span>{center.label}</span><strong className={center.value.length > 6 ? "ring-amount" : undefined}>{center.value}</strong>{center.note && <small>{center.note}</small>}</>}
+      </div>
+    </div>
+    <ul className="ring-legend">
+      {slices.map((slice) => <li key={slice.key} className={hovered === slice.key ? "active" : ""} onMouseEnter={() => setHovered(slice.key)} onMouseLeave={() => setHovered("")}>
+        <button type="button" onClick={() => setHovered(slice.key)}>
+          <i style={{ background: slice.color }} />
+          <span>{slice.label}</span>
+          <b>{money(slice.value, "ARS")}</b>
+        </button>
+      </li>)}
+      {legendExtra}
+    </ul>
+  </div>;
+}
 
 function Modal({ title, close, children, wide = false }: { title: string; close: () => void; children: ReactNode; wide?: boolean }) {
   return (
@@ -309,15 +453,17 @@ export function ControlObraApp() {
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState<View>("home");
   const [modal, setModal] = useState<ModalName>(null);
-  const [selectedExpenseId, setSelectedExpenseId] = useState<string>("");
-  const [expandedExpenseId, setExpandedExpenseId] = useState<string>("");
+  const [selectedLineId, setSelectedLineId] = useState<string>("");
+  const [expandedLineId, setExpandedLineId] = useState<string>("");
   const [selectedBudgetId, setSelectedBudgetId] = useState<string>("");
+  const [selectedBudgetItemId, setSelectedBudgetItemId] = useState<string>("");
+  const [budgetCategoryId, setBudgetCategoryId] = useState<string>("");
+  // En el celular el cuadro de rubros es más alto que ancho.
+  const narrowScreen = useSyncExternalStore(subscribeNarrow, () => window.matchMedia(narrowQuery).matches, () => false);
   const [selectedInvestorId, setSelectedInvestorId] = useState<string>("");
   const [selectedContributionId, setSelectedContributionId] = useState<string>("");
   const [expandedInvestorId, setExpandedInvestorId] = useState<string>("");
-  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<string>("all");
-  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
-  const [investmentField, setInvestmentField] = useState<"property" | "remodel" | "sale">("property");
+  const [investmentField, setInvestmentField] = useState<PlanField>("property");
   const [rate, setRate] = useState(1500);
   const [rateDate, setRateDate] = useState(today());
   const [rateSource, setRateSource] = useState("Cotización manual");
@@ -375,8 +521,9 @@ export function ControlObraApp() {
   }, [data, loaded]);
 
   useEffect(() => {
-    setExpandedExpenseId("");
+    setExpandedLineId("");
     setExpandedInvestorId("");
+    setBudgetCategoryId("");
   }, [view]);
 
   const categories = data.categories.filter((item) => !item.archived);
@@ -388,22 +535,21 @@ export function ControlObraApp() {
   const subcategoriesFor = (categoryId: string) => {
     return linkedSubcategories(categoryId, data.categories, data.subcategories);
   };
-  const paymentForExpense = (expense: Expense) => data.payments
+  // payment.expenseId guarda el id de la línea del presupuesto que se pagó.
+  const paidFor = (expense: Payable) => data.payments
     .filter((payment) => payment.expenseId === expense.id)
     .reduce((sum, payment) => {
       if (expense.currency === payment.currency) return sum + payment.amount;
       return sum + (expense.currency === "ARS" ? payment.amount * payment.rate : payment.amount / payment.rate);
     }, 0);
-  const remainingForExpense = (expense: Expense) => Math.max(0, expense.amount - paymentForExpense(expense));
+  const remainingFor = (expense: Payable) => Math.max(0, expense.amount - paidFor(expense));
+  const budgetItems = data.budgetItems ?? [];
 
   const totals = useMemo(() => {
-    const committedArs = data.expenses.reduce((sum, item) => sum + toArs(item.amount, item.currency, item.rate), 0);
-    const committedUsd = data.expenses.reduce((sum, item) => sum + toUsd(item.amount, item.currency, item.rate), 0);
-    const remainingArs = data.expenses.reduce((sum, item) => sum + toArs(remainingForExpense(item), item.currency, item.rate), 0);
-    const remainingUsd = data.expenses.reduce((sum, item) => sum + toUsd(remainingForExpense(item), item.currency, item.rate), 0);
-    const approvedArs = data.expenses.filter((item) => item.kind === "approved").reduce((sum, item) => sum + toArs(item.amount, item.currency, item.rate), 0);
-    const additionalArs = data.expenses.filter((item) => item.kind === "additional").reduce((sum, item) => sum + toArs(item.amount, item.currency, item.rate), 0);
-    const averageProgress = data.progress.length ? data.progress.reduce((sum, item) => sum + item.percent, 0) / data.progress.length : 0;
+    const committedArs = budgetItems.reduce((sum, item) => sum + toArs(item.amount, item.currency, item.rate), 0);
+    const committedUsd = budgetItems.reduce((sum, item) => sum + toUsd(item.amount, item.currency, item.rate), 0);
+    const remainingArs = budgetItems.reduce((sum, item) => sum + toArs(remainingFor(item), item.currency, item.rate), 0);
+    const remainingUsd = budgetItems.reduce((sum, item) => sum + toUsd(remainingFor(item), item.currency, item.rate), 0);
     return {
       committedArs,
       committedUsd,
@@ -411,13 +557,39 @@ export function ControlObraApp() {
       remainingUsd,
       paidArs: committedArs - remainingArs,
       paidUsd: committedUsd - remainingUsd,
-      approvedArs,
-      additionalArs,
-      averageProgress,
       paidPercent: committedArs ? ((committedArs - remainingArs) / committedArs) * 100 : 0,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+  // Costo real: cada pago pasado a dólares con la cotización del día en que se pagó.
+  const paidUsdReal = data.payments.reduce((sum, payment) => sum + toUsd(payment.amount, payment.currency, payment.rate), 0);
+  const budgetItemArs = (item: BudgetItem) => toArs(item.amount, item.currency, item.rate);
+  const budgetTotalArs = budgetItems.reduce((sum, item) => sum + budgetItemArs(item), 0);
+  // Cada categoría tiene un color fijo (orden del catálogo entre las que tienen datos), igual en todos los gráficos.
+  const usedCategoryIds = data.categories.map((item) => item.id).filter((id) => budgetItems.some((item) => item.categoryId === id));
+  const categorySlices = (entries: Array<[string, number]>): ChartSlice[] => {
+    const sums = new Map<string, number>();
+    entries.forEach(([id, value]) => sums.set(id, (sums.get(id) ?? 0) + value));
+    const named = usedCategoryIds.filter((id, index) => sums.has(id) && index < categoryColors.length);
+    const slices = named.map((id) => ({ key: id, label: categoryName(id), value: sums.get(id) ?? 0, color: categoryColors[usedCategoryIds.indexOf(id)] }));
+    const restIds = [...sums.keys()].filter((id) => !named.includes(id));
+    if (restIds.length) slices.push({ key: "other", label: restIds.length === 1 ? categoryName(restIds[0]) : `Otras (${restIds.length})`, value: restIds.reduce((sum, id) => sum + (sums.get(id) ?? 0), 0), color: otherColor });
+    return slices;
+  };
+  const categoryColor = (id: string) => {
+    const index = usedCategoryIds.indexOf(id);
+    return index >= 0 && index < categoryColors.length ? categoryColors[index] : otherColor;
+  };
+  const typeSlices = (entries: Array<[string, number]>): ChartSlice[] => {
+    const sums = new Map<string, number>();
+    entries.forEach(([id, value]) => { if (typeColors[id]) sums.set(id, (sums.get(id) ?? 0) + value); });
+    return Object.keys(typeColors).filter((id) => sums.has(id)).map((id) => ({ key: id, label: subcategoryName(id), value: sums.get(id) ?? 0, color: typeColors[id] }));
+  };
+  // Cotización del dólar para una fecha (el historial está ordenado de la más nueva a la más vieja).
+  const rateForDate = (date: string) => {
+    const history = data.exchangeRateHistory ?? [];
+    return (history.find((item) => item.date <= date) ?? history[history.length - 1])?.rate ?? rate;
+  };
   const investorCapitalTotal = data.investors.reduce((sum, investor) => sum + investor.contributions.reduce((contributionSum, contribution) => contributionSum + contributionInUsd(contribution), 0), 0);
   const selectedInvestor = data.investors.find((item) => item.id === selectedInvestorId);
   const selectedContribution = selectedInvestor?.contributions.find((item) => item.id === selectedContributionId);
@@ -454,17 +626,18 @@ export function ControlObraApp() {
     return id;
   };
 
-  const deleteExpense = (expense: Expense) => {
-    const relatedPayments = data.payments.filter((payment) => payment.expenseId === expense.id);
+  const deleteBudgetItem = (item: BudgetItem) => {
+    const relatedPayments = data.payments.filter((payment) => payment.expenseId === item.id);
     const detail = relatedPayments.length ? ` También se eliminarán ${relatedPayments.length} pago${relatedPayments.length === 1 ? "" : "s"} registrado${relatedPayments.length === 1 ? "" : "s"}.` : "";
-    if (!window.confirm(`¿Eliminar este costo? Esta acción no se puede deshacer.${detail}`)) return;
+    if (!window.confirm(`¿Eliminar esta línea del presupuesto? Esta acción no se puede deshacer.${detail}`)) return false;
     setData((current) => ({
       ...current,
-      expenses: current.expenses.filter((item) => item.id !== expense.id),
-      payments: current.payments.filter((payment) => payment.expenseId !== expense.id),
+      budgetItems: (current.budgetItems ?? []).filter((entry) => entry.id !== item.id),
+      payments: current.payments.filter((payment) => payment.expenseId !== item.id),
     }));
-    setExpandedExpenseId("");
-    notify("Costo eliminado");
+    setExpandedLineId("");
+    notify("Línea eliminada del presupuesto");
+    return true;
   };
 
   const deletePayment = (payment: Payment) => {
@@ -474,155 +647,121 @@ export function ControlObraApp() {
   };
 
   const openPaymentModal = () => {
-    if (!data.expenses.some((expense) => remainingForExpense(expense) > 0.005)) {
-      notify("No hay costos con saldo pendiente");
+    if (!budgetItems.some((item) => remainingFor(item) > 0.005)) {
+      notify(budgetItems.length ? "Todo el presupuesto ya está pagado" : "Primero cargá el presupuesto");
       return;
     }
     setModal("payment");
   };
 
-  const renderHome = () => (
-    <div className="page-content home-view">
-      <header className="simple-heading">
-        <h1>Resumen</h1>
-        <div className="heading-actions">
-          <button className="secondary-button large" onClick={openPaymentModal}>Registrar pago</button>
-          <button className="primary-button large" onClick={() => setModal("expense")}>＋ Ingresar costo</button>
-        </div>
-      </header>
+  const renderHome = () => {
+    const plan = data.investmentPlan;
+    const paymentSlices: ChartSlice[] = [
+      { key: "paid", label: "Pagado", value: totals.paidArs, color: "#2b7a55" },
+      { key: "pending", label: "Falta pagar", value: totals.remainingArs, color: trackColor },
+    ];
+    const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent);
+    const editPlan = (field: "property" | "sale") => { setInvestmentField(field); setModal("investmentPlan"); };
+    // Ganancia = venta proyectada − (propiedad con comisiones + remodelación proyectada).
+    const profitUsd = plan.projectedSalePriceUsd - propertyTotalUsd - plan.remodelBudgetUsd;
 
-      <section className="summary-grid">
-        <article className="summary-card">
-          <span>Costo total de la obra</span>
-          <strong>{money(totals.committedArs, "ARS")}</strong>
-          <small>{money(totals.committedUsd, "USD")}</small>
-        </article>
-        <article className="summary-card paid">
-          <span>Pagado</span>
-          <strong>{money(totals.paidArs, "ARS")}</strong>
-          <small>{money(totals.paidUsd, "USD")}</small>
-        </article>
-        <article className="summary-card pending">
-          <span>Falta pagar</span>
-          <strong>{money(totals.remainingArs, "ARS")}</strong>
-          <small>{money(totals.remainingUsd, "USD")}</small>
-        </article>
+    return <div className="page-content home-view">
+      <header className="simple-heading"><h1>Resumen</h1></header>
+
+      <section className="home-actions" aria-label="Acciones">
+        <button className="action-card" onClick={openPaymentModal}>
+          <span className="action-icon"><NavIcon name="check" /></span>
+          <b>Registrar pago</b>
+        </button>
+        <button className="action-card" onClick={() => { setSelectedBudgetItemId(""); setModal("budgetItem"); }}>
+          <span className="action-icon"><NavIcon name="budgets" /></span>
+          <b>Agregar al presupuesto</b>
+        </button>
       </section>
 
-      <section className="panel payment-panel">
-        <div className="panel-head">
-          <h2>Avance de pagos</h2>
-          <strong className="big-percent">{Math.round(totals.paidPercent)}%</strong>
-        </div>
-        <ProgressBar value={totals.paidPercent} tone="green" />
-        <p className="panel-note">{data.expenses.length ? "Porcentaje pagado sobre el total de costos cargados." : "Cuando cargues costos y pagos, acá vas a ver cuánto se lleva pagado."}</p>
-        <button className="text-button" onClick={() => setView("expenses")}>Ver todos los costos →</button>
+      <section className="funding-group"><span className="funding-group-label">En dólares</span><div className="investment-plan-grid">
+        <button type="button" className="plan-card" onClick={() => editPlan("property")}><span>Precio de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong></button>
+        <button type="button" className="plan-card" onClick={() => editPlan("sale")}><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong></button>
+        <div className={`plan-card static ${profitUsd < 0 ? "negative" : "positive"}`} title="Venta proyectada − (propiedad con comisiones + remodelación proyectada)"><span>Ganancia</span><strong>{plan.projectedSalePriceUsd > 0 ? money(profitUsd, "USD") : "—"}</strong></div>
+      </div></section>
+
+      <section className="home-charts">
+        <article className="panel chart-panel">
+          <div className="panel-head">
+            <div><h2>Presupuesto</h2><p>Por rubro</p></div>
+            <button className="text-button" onClick={() => setView("budgets")}>Ver presupuesto</button>
+          </div>
+          {budgetItems.length === 0
+            ? <div className="chart-empty">Todavía no cargaste el presupuesto.</div>
+            : <RingChart
+              ariaLabel="Presupuesto por rubro"
+              slices={categorySlices(budgetItems.map((item) => [item.categoryId, budgetItemArs(item)]))}
+              scale={budgetTotalArs}
+              center={{ label: "Total", value: money(budgetTotalArs, "ARS") }}
+            />}
+        </article>
+
+        <article className="panel chart-panel">
+          <div className="panel-head">
+            <div><h2>Pagos</h2><p>Cuánto se pagó del presupuesto</p></div>
+            <button className="text-button" onClick={() => setView("payments")}>Ver pagos</button>
+          </div>
+          {budgetItems.length === 0
+            ? <div className="chart-empty">Todavía no cargaste el presupuesto.</div>
+            : <RingChart
+              ariaLabel="Pagado y pendiente del presupuesto"
+              slices={paymentSlices}
+              scale={totals.committedArs}
+              center={{ label: "Pagado", value: `${Math.round(totals.paidPercent)}%`, note: "del presupuesto" }}
+              legendExtra={<li className="legend-total"><span>Pagado en dólares</span><b>{money(paidUsdReal, "USD")}</b></li>}
+            />}
+        </article>
       </section>
-    </div>
-  );
+    </div>;
+  };
 
-  const renderExpenses = () => {
-    const isPending = (expense: Expense) => remainingForExpense(expense) > 0.005;
-    const pendingCount = data.expenses.filter(isPending).length;
-    const filteredExpenses = data.expenses
-      .filter((expense) => expenseCategoryFilter === "all" || (expenseCategoryFilter === "pending" ? isPending(expense) : expense.categoryId === expenseCategoryFilter))
-      .slice()
-      .sort((a, b) => b.date.localeCompare(a.date));
-    const remodelBudget = data.investmentPlan.remodelBudgetUsd;
-    const remodelDifference = totals.committedUsd - remodelBudget;
-    const toggleExpense = (expense: Expense) => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id);
-    const expenseDetails = (expense: Expense, remaining: number) => <InlinePaymentForm
-      expense={expense}
-      rate={rate}
-      remaining={remaining}
-      payments={data.payments.filter((payment) => payment.expenseId === expense.id)}
-      removePayment={deletePayment}
-      edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
-      remove={() => deleteExpense(expense)}
-      save={(payment) => {
-        setData((current) => ({ ...current, payments: [...current.payments, payment] }));
-        notify("Pago registrado");
-      }}
-    />;
-    const balanceLabel = (expense: Expense, remaining: number) => remaining > 0.005
-      ? <span className="balance">Falta {money(remaining, expense.currency)}</span>
-      : <span className="paid">✓ Pagado</span>;
-
+  const renderPayments = () => {
+    const lineFor = (payment: Payment) => budgetItems.find((item) => item.id === payment.expenseId);
     return <div className="page-content">
-      <SimpleHeading title="Costos" action="Ingresar costo" onAction={() => setModal("expense")} />
-      {remodelBudget > 0 && <p className={`budget-line ${remodelDifference > 0.005 ? "over" : ""}`}>
-        Presupuesto proyectado <b>{money(remodelBudget, "USD")}</b> · Gastado <b>{money(totals.committedUsd, "USD")}</b>
-        {remodelDifference > 0.005 && <> · <b>{money(remodelDifference, "USD")} por encima</b></>}
-      </p>}
-      {data.expenses.length > 0 && <div className="expense-category-filters" aria-label="Filtrar costos">
-        <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
-        {pendingCount > 0 && <button className={expenseCategoryFilter === "pending" ? "active" : ""} onClick={() => setExpenseCategoryFilter("pending")}>Falta pagar <span>{pendingCount}</span></button>}
-        {categories.map((category) => {
-          const count = data.expenses.filter((expense) => expense.categoryId === category.id).length;
-          return count > 0 ? <button key={category.id} className={expenseCategoryFilter === category.id ? "active" : ""} onClick={() => setExpenseCategoryFilter(category.id)}>{category.name} <span>{count}</span></button> : null;
-        })}
-      </div>}
-      {data.expenses.length === 0 ? <EmptyState title="Todavía no hay costos" copy="Ingresá el primer costo para comenzar." action="Ingresar costo" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay costos en este filtro.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
-        <><p className="list-hint">Tocá un costo para ver el detalle o registrar un pago.</p>
-        <div className="expense-sheet-wrap expense-desktop-view">
-          <table className="expense-sheet">
-            <thead><tr><th>Fecha</th><th>Concepto</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Falta pagar</th></tr></thead>
-            <tbody>{filteredExpenses.map((expense) => {
-              const paid = paymentForExpense(expense);
-              const remaining = remainingForExpense(expense);
-              const expanded = expandedExpenseId === expense.id;
-              return <Fragment key={expense.id}><tr
-                className={`expense-data-row ${expanded ? "expanded" : ""}`}
-                tabIndex={0}
-                aria-expanded={expanded}
-                onClick={() => toggleExpense(expense)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    toggleExpense(expense);
-                  }
-                }}
-              >
-                <td className="date-cell">{shortDate(expense.date)}</td>
-                <td className="concept-cell"><b>{categoryName(expense.categoryId)}</b>{subcategoryName(expense.subcategoryId) && <span> · {subcategoryName(expense.subcategoryId)}</span>}{expense.description && <small>{expense.description}</small>}</td>
-                <td className="number-cell"><b>{money(expense.amount, expense.currency)}</b></td>
-                <td className="number-cell paid-cell">{money(paid, expense.currency)}</td>
-                <td className="number-cell balance-cell">{remaining > 0.005 ? money(remaining, expense.currency) : <span className="paid">✓ Pagado</span>}</td>
-              </tr>
-              {expanded && <tr className="expense-payment-row"><td colSpan={5}>
-                {expenseDetails(expense, remaining)}
-              </td></tr>}
-              </Fragment>;
-            })}</tbody>
-          </table>
+      <SimpleHeading title="Pagos" action="Registrar pago" onAction={openPaymentModal} />
+      {budgetItems.length > 0 && <section className="panel real-cost-panel">
+        <div className="real-cost-head">
+          <div>
+            <span>Costo real pagado en dólares</span>
+            <strong>{money(paidUsdReal, "USD")}</strong>
+            <small>{totals.remainingArs > 0.5 ? "Cada pago se pasa a dólares con la cotización del día en que se pagó." : "Todo el presupuesto está pagado: este es el costo final en dólares."}</small>
+          </div>
         </div>
-        <div className="expense-mobile-list">{filteredExpenses.map((expense) => {
-          const remaining = remainingForExpense(expense);
-          const expanded = expandedExpenseId === expense.id;
-          return <article className={`expense-mobile-card ${expanded ? "expanded" : ""}`} key={expense.id}>
-            <button type="button" className="expense-mobile-summary" aria-expanded={expanded} onClick={() => toggleExpense(expense)}>
-              <div className="expense-mobile-title"><b>{pathName(expense.categoryId, expense.subcategoryId)}</b><strong>{money(expense.amount, expense.currency)}</strong></div>
-              <div className="expense-mobile-meta"><time>{shortDate(expense.date)}</time>{balanceLabel(expense, remaining)}</div>
-            </button>
-            {expanded && <div className="expense-mobile-details">{expenseDetails(expense, remaining)}</div>}
-          </article>;
-        })}</div></>
-      )}
-      <div className="expenses-footer">
-        <button className="text-button" onClick={() => setView("categories")}>Administrar categorías</button>
-        {data.payments.length > 0 && <button className="text-button" onClick={() => setShowPaymentHistory((visible) => !visible)}>{showPaymentHistory ? "Ocultar historial de pagos" : `Ver historial de pagos (${data.payments.length})`}</button>}
-      </div>
-      {showPaymentHistory && data.payments.length > 0 && <section className="history-section">
-        <h2>Historial de pagos</h2>
-        <div className="payment-history-list">{data.payments.slice().sort((a, b) => b.date.localeCompare(a.date)).map((payment) => {
-          const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <article key={payment.id}>
-            <div><b>{expense ? pathName(expense.categoryId, expense.subcategoryId) : "Costo"}</b><small>{shortDate(payment.date)}{payment.description ? ` · ${payment.description}` : ""}</small></div>
-            <strong>{money(payment.amount, payment.currency)}</strong>
-            <button className="danger-button compact" onClick={() => deletePayment(payment)}>Eliminar</button>
-          </article>;
-        })}</div>
+        <div className="cost-meter" role="img" aria-label={`Pagado ${money(totals.paidArs, "ARS")}, falta pagar ${money(totals.remainingArs, "ARS")}`}>
+          {totals.paidArs > 0.5 && <span className="paid" style={{ width: `${totals.paidPercent}%` }} title={`Pagado: ${money(totals.paidArs, "ARS")} = ${money(paidUsdReal, "USD")}`} />}
+          {totals.remainingArs > 0.5 && <span className="pending" style={{ width: `${100 - totals.paidPercent}%` }} title={`Falta pagar: ${money(totals.remainingArs, "ARS")}`} />}
+        </div>
+        <div className="cost-meter-legend">
+          <span><i className="paid" />Pagado <b>{money(totals.paidArs, "ARS")}</b> → <b>{money(paidUsdReal, "USD")}</b></span>
+          <span><i className="pending" />Falta pagar <b>{money(totals.remainingArs, "ARS")}</b> <small>se pasa a dólares al pagarse</small></span>
+        </div>
       </section>}
+      {data.payments.length === 0
+        ? <EmptyState title="Todavía no hay pagos" copy="Cuando pagues algo del presupuesto, registralo acá. Cada pago se pasa a dólares con la cotización de ese día." action="Registrar pago" onAction={openPaymentModal} />
+        : <section className="history-block">
+          <h2>Pagos realizados</h2>
+          <div className="payment-history standalone">
+            <div className="payment-history-row head"><span>Fecha</span><span>Qué se pagó</span><span className="num">Pagado</span><span className="num">Dólar del día</span><span className="num">En dólares</span><span /></div>
+            {data.payments.slice().sort((a, b) => b.date.localeCompare(a.date)).map((payment) => {
+              const line = lineFor(payment);
+              const note = [line?.description, payment.description].filter(Boolean).join(" · ");
+              return <div className="payment-history-row" key={payment.id}>
+                <span className="date">{shortDate(payment.date)}</span>
+                <span className="concept"><b>{line ? pathName(line.categoryId, line.subcategoryId) : "Línea eliminada"}</b>{note && <small>{note}</small>}</span>
+                <span className="num"><b>{money(payment.amount, payment.currency)}</b></span>
+                <span className="num muted rate">{payment.currency === "ARS" ? money(payment.rate, "ARS") : "—"}</span>
+                <span className="num">{money(toUsd(payment.amount, payment.currency, payment.rate), "USD")}</span>
+                <span className="num"><button className="link-danger" onClick={() => deletePayment(payment)}>Eliminar</button></span>
+              </div>;
+            })}
+            <div className="payment-history-row total"><span /><span>Total</span><span className="num"><b>{money(data.payments.reduce((sum, payment) => sum + toArs(payment.amount, payment.currency, payment.rate), 0), "ARS")}</b></span><span /><span className="num"><b>{money(paidUsdReal, "USD")}</b></span><span /></div>
+          </div>
+        </section>}
     </div>;
   };
 
@@ -640,33 +779,146 @@ export function ControlObraApp() {
     </div>
   );
 
-  const renderBudgets = () => (
-    <div className="page-content">
-      <SimpleHeading title="Presupuestos" action="Nueva comparación" onAction={() => setModal("budget")} />
-      {data.budgetGroups.length === 0 ? <EmptyState title="No hay presupuestos cargados" copy="Creá una comparación (por ejemplo “sanitarios del baño”) y agregá las ofertas de cada proveedor. Al aprobar una, pasa a Costos." action="Nueva comparación" onAction={() => setModal("budget")} /> : (
+  const lineStatus = (item: BudgetItem) => {
+    const remaining = remainingFor(item);
+    if (remaining <= 0.005) return <small className="paid">✓ Pagado</small>;
+    if (paidFor(item) > 0.005) return <small className="balance">Pago parcial · falta {money(remaining, item.currency)}</small>;
+    return <small className="unpaid">Sin pagar</small>;
+  };
+  const paidArsFor = (item: BudgetItem) => toArs(paidFor(item), item.currency, item.rate);
+
+  const renderBudgetLine = (item: BudgetItem) => {
+    const expanded = expandedLineId === item.id;
+    return <article className={`budget-entry ${expanded ? "expanded" : ""}`} key={item.id}>
+      <button type="button" className="budget-item-row" aria-expanded={expanded} onClick={() => setExpandedLineId((current) => current === item.id ? "" : item.id)}>
+        <span><b>{item.description || "Sin descripción"}</b></span>
+        <span className="budget-item-amounts"><strong>{money(item.amount, item.currency)}</strong>{lineStatus(item)}</span>
+      </button>
+      {expanded && <div className="budget-entry-detail"><InlinePaymentForm
+        expense={item}
+        rateFor={rateForDate}
+        remaining={remainingFor(item)}
+        payments={data.payments.filter((payment) => payment.expenseId === item.id)}
+        removePayment={deletePayment}
+        edit={() => { setSelectedBudgetItemId(item.id); setModal("budgetItem"); }}
+        remove={() => deleteBudgetItem(item)}
+        save={(payment) => {
+          setData((current) => ({ ...current, payments: [...current.payments, payment] }));
+          notify("Pago registrado");
+        }}
+      /></div>}
+    </article>;
+  };
+
+  const renderBudgetCategory = (categoryId: string) => {
+    const items = budgetItems.filter((item) => item.categoryId === categoryId);
+    const total = items.reduce((sum, item) => sum + budgetItemArs(item), 0);
+    const paid = items.reduce((sum, item) => sum + paidArsFor(item), 0);
+    const groups = [...Object.keys(typeColors), ""]
+      .map((typeId) => ({ typeId, items: items.filter((item) => (typeColors[item.subcategoryId] ? item.subcategoryId : "") === typeId) }))
+      .filter((group) => group.items.length > 0);
+    return <>
+      <button className="text-button back-link" onClick={() => { setBudgetCategoryId(""); setExpandedLineId(""); }}>← Todo el presupuesto</button>
+      <section className="category-head">
+        <div><span className="category-dot" style={{ background: categoryColor(categoryId) }} /><h2>{categoryName(categoryId)}</h2></div>
+        <button className="secondary-button" onClick={() => { setSelectedBudgetItemId(""); setModal("budgetItem"); }}>＋ Agregar a {categoryName(categoryId)}</button>
+      </section>
+      <p className="category-summary">Presupuestado <b>{money(total, "ARS")}</b> · Pagado <b>{money(paid, "ARS")}</b> ({total ? Math.round((paid / total) * 100) : 0}%) · Falta <b>{money(Math.max(0, total - paid), "ARS")}</b></p>
+      {groups.length === 0 ? <div className="inline-empty">No quedan líneas en este rubro.</div> : groups.map((group) => <section className="type-group" key={group.typeId || "none"}>
+        <div className="type-group-head">
+          <h3>{group.typeId ? subcategoryName(group.typeId) : "Sin tipo (editá la línea para elegir uno)"}</h3>
+          <span>{money(group.items.reduce((sum, item) => sum + budgetItemArs(item), 0), "ARS")}</span>
+        </div>
+        <div className="budget-item-list">{group.items.slice().sort((a, b) => budgetItemArs(b) - budgetItemArs(a)).map(renderBudgetLine)}</div>
+      </section>)}
+      <p className="list-hint">Tocá una línea para ver sus pagos, pagarla, editarla o eliminarla.</p>
+    </>;
+  };
+
+  const renderBudgets = () => {
+    const addItem = () => { setSelectedBudgetItemId(""); setModal("budgetItem"); };
+    const typedTotal = budgetItems.filter((item) => typeColors[item.subcategoryId]).reduce((sum, item) => sum + budgetItemArs(item), 0);
+    const untypedTotal = budgetTotalArs - typedTotal;
+    const sums = new Map<string, { total: number; paid: number }>();
+    budgetItems.forEach((item) => {
+      const current = sums.get(item.categoryId) ?? { total: 0, paid: 0 };
+      sums.set(item.categoryId, { total: current.total + budgetItemArs(item), paid: current.paid + paidArsFor(item) });
+    });
+    const tiles = [...sums.entries()].sort((a, b) => b[1].total - a[1].total);
+    const box = narrowScreen ? treemapBoxNarrow : treemapBox;
+    const rects = squarify(tiles.map(([, value]) => value.total), box);
+    const openCategory = (id: string) => { setBudgetCategoryId(id); setExpandedLineId(""); window.scrollTo({ top: 0 }); };
+    return <div className="page-content">
+      <SimpleHeading title="Presupuesto" action="Agregar al presupuesto" onAction={addItem} />
+      {budgetItems.length === 0 ? <EmptyState title="Todavía no cargaste el presupuesto" copy="Anotá lo que pensás gastar en cada rubro (contratista, electricista…) y si es mano de obra, materiales o adicionales." action="Agregar al presupuesto" onAction={addItem} /> : <>
+        <section className="budget-total">
+          <span>Presupuesto total de la obra</span>
+          <strong>{money(budgetTotalArs, "ARS")}</strong>
+          <small>Pagado hasta hoy: {money(totals.paidArs, "ARS")} ({Math.round(totals.paidPercent)}%) · falta pagar {money(totals.remainingArs, "ARS")}</small>
+        </section>
+        {budgetCategoryId ? renderBudgetCategory(budgetCategoryId) : <>
+          <section className="home-charts">
+            <article className="panel chart-panel">
+              <div className="panel-head"><div><h2>Por rubro</h2><p>Contratista, electricista, etc.</p></div></div>
+              <RingChart ariaLabel="Presupuesto por rubro" slices={categorySlices(budgetItems.map((item) => [item.categoryId, budgetItemArs(item)]))} scale={budgetTotalArs} center={{ label: "Total", value: money(budgetTotalArs, "ARS") }} />
+            </article>
+            <article className="panel chart-panel">
+              <div className="panel-head"><div><h2>Por tipo</h2><p>Mano de obra, materiales y adicionales</p></div></div>
+              <RingChart ariaLabel="Presupuesto por tipo" slices={typeSlices(budgetItems.map((item) => [item.subcategoryId, budgetItemArs(item)]))} scale={typedTotal} center={{ label: "Total", value: money(typedTotal, "ARS") }}
+                legendExtra={untypedTotal > 0.5 ? <li className="legend-note">{money(untypedTotal, "ARS")} todavía no tienen tipo: elegíselo desde el detalle del rubro.</li> : undefined} />
+            </article>
+          </section>
+          <section className="budget-items">
+            <h2>Detalle por rubro</h2>
+            <p className="list-hint">El tamaño de cada cuadro es lo presupuestado. Tocá uno para ver sus líneas y pagos.</p>
+            <div className="treemap">{tiles.map(([id, value], index) => {
+              const rect = rects[index];
+              const color = categoryColor(id);
+              const size = rect.w / box.w < 0.11 || rect.h / box.h < 0.13 ? "tiny" : rect.w / box.w < 0.22 || rect.h / box.h < 0.22 ? "small" : "";
+              const paidPercent = value.total ? Math.round((value.paid / value.total) * 100) : 0;
+              return <button type="button" key={id} className={`treemap-tile ${size}`} onClick={() => openCategory(id)}
+                title={`${categoryName(id)}: ${money(value.total, "ARS")} · pagado ${paidPercent}%`}
+                style={{ left: `${(rect.x / box.w) * 100}%`, top: `${(rect.y / box.h) * 100}%`, width: `${(rect.w / box.w) * 100}%`, height: `${(rect.h / box.h) * 100}%`, background: color, color: readableTextOn(color) }}>
+                <b>{categoryName(id)}</b>
+                <span>{money(value.total, "ARS")}</span>
+                <small>Pagado {paidPercent}%</small>
+              </button>;
+            })}</div>
+            <div className="expenses-footer"><button className="text-button" onClick={() => setView("categories")}>Administrar categorías</button></div>
+          </section>
+        </>}
+      </>}
+
+      {!budgetCategoryId && <section className="comparisons">
+        <div className="section-head">
+          <div><h2>Comparar proveedores</h2><p>Cargá ofertas de distintos proveedores para lo mismo y elegí una: se suma sola al presupuesto.</p></div>
+          <button className="secondary-button" onClick={() => setModal("budget")}>＋ Nueva comparación</button>
+        </div>
+        {data.budgetGroups.length === 0 ? <div className="inline-empty">No hay comparaciones. Creá una, por ejemplo “sanitarios del baño”, y cargá las ofertas.</div> : (
         <div className="budget-groups">{data.budgetGroups.map((group) => {
           const amounts = group.offers.map((offer) => toArs(offer.amount, offer.currency, offer.rate));
           const cheapest = amounts.length ? Math.min(...amounts) : 0;
           const approved = group.offers.find((offer) => offer.id === group.approvedOfferId);
           return <section className="budget-group" key={group.id}>
-            <div className="budget-group-head"><div><span className="soft-label">{pathName(group.categoryId, group.subcategoryId)}</span><h2>{group.name}</h2></div><div className="budget-head-actions">{approved && <span className="approved-pill">✓ {approved.supplier}</span>}<button className="secondary-button" onClick={() => { setSelectedBudgetId(group.id); setModal("offer"); }}>＋ Agregar oferta</button><button className="danger-button compact" onClick={() => deleteBudgetGroup(group)}>Eliminar</button></div></div>
+            <div className="budget-group-head"><div><span className="soft-label">{pathName(group.categoryId, group.subcategoryId)}</span><h2>{group.name}</h2></div><div className="budget-head-actions">{approved && <span className="approved-pill">✓ Elegido: {approved.supplier}</span>}<button className="secondary-button" onClick={() => { setSelectedBudgetId(group.id); setModal("offer"); }}>＋ Agregar oferta</button><button className="danger-button compact" onClick={() => deleteBudgetGroup(group)}>Eliminar</button></div></div>
             {group.offers.length === 0 ? <div className="inline-empty">Todavía no hay ofertas en esta comparación.</div> : <div className="offers-grid">{group.offers.map((offer) => {
               const ars = toArs(offer.amount, offer.currency, offer.rate);
               const isApproved = offer.id === group.approvedOfferId;
               const isCheapest = Math.abs(ars - cheapest) < 0.01;
               const diff = cheapest ? ((ars - cheapest) / cheapest) * 100 : 0;
               return <article className={`offer-card ${isApproved ? "approved" : isCheapest ? "cheapest" : "higher"}`} key={offer.id} title={isCheapest ? "Es la oferta más económica" : `${Math.round(diff)}% por encima de la oferta más económica`}>
-                <div className="offer-top"><span>{isApproved ? "Aprobado" : isCheapest ? "Mejor precio" : `+${Math.round(diff)}%`}</span><time>{shortDate(offer.date)}</time></div>
+                <div className="offer-top"><span>{isApproved ? "Elegido" : isCheapest ? "Mejor precio" : `+${Math.round(diff)}%`}</span><time>{shortDate(offer.date)}</time></div>
                 <h3>{offer.supplier}</h3><p>{offer.description || "Sin descripción adicional"}</p>
                 <strong>{money(offer.amount, offer.currency)}</strong><small>{offer.currency === "ARS" ? money(toUsd(offer.amount, offer.currency, offer.rate), "USD") : money(ars, "ARS")} · dólar {money(offer.rate, "ARS")}</small>
-                {!group.approvedOfferId && <button className="primary-button full" onClick={() => approveOffer(group.id, offer.id)}>Aprobar presupuesto</button>}
+                {!group.approvedOfferId && <button className="primary-button full" onClick={() => approveOffer(group.id, offer.id)}>Elegir y sumar al presupuesto</button>}
               </article>;
             })}</div>}
           </section>;
         })}</div>
-      )}
-    </div>
-  );
+        )}
+      </section>}
+    </div>;
+  };
 
   const deleteInvestor = (investor: Investor) => {
     if (!window.confirm(`¿Eliminar a “${investor.name}” y todos sus aportes? Esta acción no se puede deshacer.`)) return;
@@ -686,114 +938,73 @@ export function ControlObraApp() {
 
   const renderInvestors = () => {
     const plan = data.investmentPlan;
-    const investorCapital = investorCapitalTotal;
     const investorProfit = data.investors.reduce((sum, investor) => sum + investor.profitUsd, 0);
-    const calculatedOwnCapital = Math.max(0, propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent) + plan.remodelBudgetUsd - investorCapital);
-    const effectiveOwnCapital = calculatedOwnCapital;
-    const ownerProfit = plan.projectedSalePriceUsd > 0 ? plan.projectedSalePriceUsd - investorCapital - investorProfit - effectiveOwnCapital : 0;
-    const ownReturnPercent = effectiveOwnCapital ? (ownerProfit / effectiveOwnCapital) * 100 : 0;
-    const ownTermDays = plan.purchaseDate && plan.projectedSaleDate
-      ? (new Date(`${plan.projectedSaleDate}T12:00:00`).getTime() - new Date(`${plan.purchaseDate}T12:00:00`).getTime()) / 86_400_000
-      : null;
-    const ownAnnualRate = ownTermDays && ownTermDays > 0 ? ownReturnPercent * (365 / ownTermDays) : null;
-    const ownRateStatus = !effectiveOwnCapital ? "Sin aporte" : !plan.projectedSaleDate ? "Falta fecha de venta" : !plan.purchaseDate ? "Falta fecha de compra" : !ownTermDays || ownTermDays <= 0 ? "Revisar fechas" : "Calculada";
-    const propertyCommissionUsd = plan.propertyValueUsd * (plan.propertyCommissionPercent / 100);
+    const ownMoney = plan.ownCapitalUsd;
+    const ownerProfit = plan.projectedSalePriceUsd - investorCapitalTotal - investorProfit - ownMoney;
     const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent);
-    const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
-    const editPlan = (field: "property" | "remodel" | "sale") => { setInvestmentField(field); setModal("investmentPlan"); };
+    const editPlan = (field: PlanField) => { setInvestmentField(field); setModal("investmentPlan"); };
+    const addInvestor = () => { setSelectedInvestorId(""); setModal("investor"); };
     return <div className="page-content">
-      <SimpleHeading title="Inversores" action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
+      <SimpleHeading title="Inversores" action="Nuevo inversor" onAction={addInvestor} />
 
-      <section className="funding-group"><span className="funding-group-label">Inversión y venta · tocá para editar</span><div className="investment-plan-grid">
-        <button type="button" className="plan-card" onClick={() => editPlan("property")}><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{plan.propertyValueUsd > 0 ? `Incluye ${money(propertyCommissionUsd, "USD")} de comisiones (${percent(plan.propertyCommissionPercent)})` : "Falta cargar el valor"}</small></button>
-        <button type="button" className={`plan-card ${plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "over" : ""}`} onClick={() => editPlan("remodel")}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : "Dentro de lo proyectado"}</small></button>
+      <section className="funding-group"><span className="funding-group-label">La inversión (en dólares) · tocá para editar</span><div className="investment-plan-grid">
+        <button type="button" className="plan-card" onClick={() => editPlan("property")}><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{plan.propertyValueUsd > 0 ? `Incluye ${percent(plan.propertyCommissionPercent)} de comisiones` : "Falta cargar el valor"}</small></button>
+        <button type="button" className="plan-card" onClick={() => editPlan("remodel")}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd > 0 ? "Lo que estimás gastar en la obra" : "Falta cargar el estimado"}</small></button>
         <button type="button" className="plan-card" onClick={() => editPlan("sale")}><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Fecha estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></button>
       </div></section>
 
-      <section className="funding-group"><span className="funding-group-label">Capital propio</span><div className="funding-summary-grid own-funding-summary">
-        <article><span>Capital propio calculado</span><strong>{money(effectiveOwnCapital, "USD")}</strong><small>{plan.ownCapitalManual ? `Estimado informado: ${money(plan.ownCapitalUsd, "USD")}` : "Calculado automáticamente"}</small></article>
-        <article className={ownerProfit < 0 ? "negative" : "owner-profit"}><span>Ganancia proyectada propia</span><strong>{money(ownerProfit, "USD")}</strong><small>{plan.projectedSalePriceUsd > 0 ? "Según venta proyectada" : "Falta cargar el precio de venta"}</small></article>
-      </div></section>
-      <section className="funding-group"><span className="funding-group-label">Inversores</span><div className="funding-summary-grid investor-funding-summary">
-        <article><span>Capital de inversores</span><strong>{money(investorCapital, "USD")}</strong></article>
-        <article><span>Ganancia pactada de inversores</span><strong>{money(investorProfit, "USD")}</strong></article>
-        <article><span>Total a devolver a inversores</span><strong>{money(investorCapital + investorProfit, "USD")}</strong></article>
+      <section className="funding-group"><span className="funding-group-label">Tu parte</span><div className="investment-plan-grid own-funding-summary">
+        <button type="button" className="plan-card" onClick={() => editPlan("own")}><span>Plata propia</span><strong>{money(ownMoney, "USD")}</strong><small>{ownMoney > 0 ? "Lo que pusiste vos · tocá para editar" : "Tocá para cargarla"}</small></button>
+        <div className={`plan-card static ${ownerProfit < 0 ? "negative" : "positive"}`}><span>Ganancia proyectada</span><strong>{plan.projectedSalePriceUsd > 0 ? money(ownerProfit, "USD") : "—"}</strong><small>{plan.projectedSalePriceUsd <= 0 ? "Falta el precio de venta" : ownMoney <= 0 ? "Falta cargar la plata propia para que sea real" : "Venta − lo que se devuelve a inversores − plata propia"}</small></div>
       </div></section>
 
-      <><div className="investor-sheet-wrap investor-desktop-view">
-        <table className="investor-sheet">
-          <thead><tr><th>Inversor</th><th>Fecha</th><th className="number-cell">Monto</th><th className="number-cell">Ganancia</th><th className="number-cell">A devolver en USD</th><th className="number-cell">Ganancia %</th><th className="number-cell">Tasa anual simple</th></tr></thead>
-          <tbody>
-            <Fragment><tr className={`investor-data-row own-capital-row ${expandedInvestorId === "own-capital" ? "expanded" : ""}`} tabIndex={0} aria-expanded={expandedInvestorId === "own-capital"} onClick={() => setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital")} onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital"); }
-            }}>
-              <td><b>Capital propio calculado</b><small>Fila fija</small></td>
-              <td>{plan.purchaseDate ? shortDate(plan.purchaseDate) : "—"}</td>
-              <td className="number-cell"><b>{money(effectiveOwnCapital, "USD")}</b></td>
-              <td className="number-cell profit-cell"><b>{money(ownerProfit, "USD")}</b></td>
-              <td className="number-cell"><b>{money(effectiveOwnCapital + ownerProfit, "USD")}</b></td>
-              <td className="number-cell">{percent(ownReturnPercent)}</td>
-              <td className="number-cell annual-rate-cell">{ownAnnualRate === null ? <small className="rate-warning">{ownRateStatus}</small> : <div className="annual-rate-value"><b>{percent(ownAnnualRate)}</b><small>{Math.round(ownTermDays ?? 0)} días</small></div>}</td>
-            </tr>{expandedInvestorId === "own-capital" && <tr className="investor-actions-row own-capital-actions-row"><td colSpan={7}><div><span>Se calcula con propiedad + {percent(plan.propertyCommissionPercent)} de comisiones + remodelación proyectada − aportes de inversores.</span><div className="investor-actions"><button className="mini-button" onClick={() => setModal("investmentPlan")}>Editar valores de la inversión</button></div></div></td></tr>}</Fragment>
-            {data.investors.map((investor) => {
+      <section className="funding-group"><span className="funding-group-label">Inversores{data.investors.length > 0 ? " · tocá uno para ver el detalle" : ""}</span>
+        {data.investors.length === 0 ? <div className="inline-empty">Todavía no hay inversores.<button className="text-button" onClick={addInvestor}>＋ Agregar inversor</button></div> : <div className="investor-list">
+          <div className="investor-row head"><span>Inversor</span><span className="num">Invirtió</span><span className="num">Ganancia acordada</span></div>
+          {data.investors.map((investor) => {
             const metrics = investorMetrics(investor, plan.projectedSaleDate);
             const expanded = expandedInvestorId === investor.id;
             const contributions = investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
-            const toggleInvestor = () => setExpandedInvestorId((current) => current === investor.id ? "" : investor.id);
-            return <Fragment key={investor.id}><tr className={`investor-data-row ${expanded ? "expanded" : ""}`} tabIndex={0} aria-expanded={expanded} onClick={toggleInvestor} onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleInvestor(); }
-            }}>
-              <td><b>{investor.name}</b></td>
-              <td><div className="investor-contribution-cell">{contributions.length === 0 ? <small>Sin fecha</small> : contributions.map((contribution) => <span key={contribution.id}>{shortDate(contribution.date)}</span>)}</div></td>
-              <td className="number-cell"><div className="investor-contribution-cell amount">{contributions.length === 0 ? <small>Sin monto</small> : contributions.map((contribution) => <span key={contribution.id}><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></span>)}</div></td>
-              <td className="number-cell profit-cell"><b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b>{(investor.profitCurrency ?? "USD") === "ARS" && <small>{money(investor.profitUsd, "USD")}</small>}</td>
-              <td className="number-cell"><b>{money(metrics.capital + investor.profitUsd, "USD")}</b></td>
-              <td className="number-cell">{percent(metrics.totalReturnPercent)}</td>
-              <td className="number-cell annual-rate-cell">{metrics.annualRate === null ? <small className="rate-warning">{metrics.annualRateStatus}</small> : <div className="annual-rate-value"><b>{percent(metrics.annualRate)}</b><small>{Math.round(metrics.termDays ?? 0)} días</small></div>}</td>
-            </tr>{expanded && <tr className="investor-actions-row"><td colSpan={7}><div className="investor-expanded-actions"><div className="contribution-edit-list">{contributions.map((contribution) => <button className="mini-button" type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>Editar aporte · {shortDate(contribution.date)} · {money(contribution.amount, contribution.currency ?? "USD")}</button>)}</div><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar inversor</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar inversor</button></div></div></td></tr>}</Fragment>;
-          })}</tbody>
-        </table>
-        <div className="annual-rate-help">Tocá una fila para ver opciones. Tasa anual simple: ganancia % × 365 ÷ días hasta la venta (sin reinversión).</div>
-      </div>
-      <div className="investor-mobile-list">
-        <article className={`investor-mobile-card own-capital-card ${expandedInvestorId === "own-capital" ? "expanded" : ""}`}>
-          <button type="button" className="investor-mobile-summary" aria-expanded={expandedInvestorId === "own-capital"} onClick={() => setExpandedInvestorId((current) => current === "own-capital" ? "" : "own-capital")}>
-            <div><b>Capital propio calculado</b><small>Fila fija</small></div>
-            <span>Monto <b>{money(effectiveOwnCapital, "USD")}</b></span>
-            <span>Tasa anual <b>{ownAnnualRate === null ? ownRateStatus : percent(ownAnnualRate)}</b></span>
-          </button>
-          {expandedInvestorId === "own-capital" && <div className="investor-mobile-details">
-            <div className="investor-mobile-stats"><span>Fecha <b>{plan.purchaseDate ? shortDate(plan.purchaseDate) : "—"}</b></span><span>Ganancia <b>{money(ownerProfit, "USD")}</b></span><span>A devolver <b>{money(effectiveOwnCapital + ownerProfit, "USD")}</b></span><span>Ganancia % <b>{percent(ownReturnPercent)}</b></span></div>
-            <div className="investor-mobile-actions"><button className="mini-button" onClick={() => setModal("investmentPlan")}>Editar valores de la inversión</button></div>
-          </div>}
-        </article>
-        {data.investors.map((investor) => {
-        const metrics = investorMetrics(investor, plan.projectedSaleDate);
-        const expanded = expandedInvestorId === investor.id;
-        const contributions = investor.contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
-        return <article className={`investor-mobile-card ${expanded ? "expanded" : ""}`} key={investor.id}>
-          <button type="button" className="investor-mobile-summary" aria-expanded={expanded} onClick={() => setExpandedInvestorId((current) => current === investor.id ? "" : investor.id)}>
-            <div><b>{investor.name}</b><small>{investor.contributions.length} {investor.contributions.length === 1 ? "aporte" : "aportes"}</small></div>
-            <span>Monto <b>{money(metrics.capital, "USD")}</b></span>
-            <span>Tasa anual <b>{metrics.annualRate === null ? metrics.annualRateStatus : percent(metrics.annualRate)}</b></span>
-          </button>
-          {expanded && <div className="investor-mobile-details">
-            <div className="investor-mobile-stats"><span>Ganancia <b>{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</b></span><span>A devolver <b>{money(metrics.capital + investor.profitUsd, "USD")}</b></span><span>Ganancia % <b>{percent(metrics.totalReturnPercent)}</b></span><span>Plazo <b>{metrics.termDays ? `${Math.round(metrics.termDays)} días` : "—"}</b></span></div>
-            <div className="investor-mobile-contributions"><span>Aportes recibidos</span>{contributions.length === 0 ? <small>Sin aportes</small> : <><div className="contribution-mobile-head"><span>Fecha</span><span>Monto</span></div>{contributions.map((contribution) => <div className="contribution-mobile-data" key={contribution.id}><span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b></div>)}</>}</div>
-            {contributions.length > 0 && <div className="contribution-edit-list">{contributions.map((contribution) => <button className="mini-button" type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>Editar aporte · {shortDate(contribution.date)}</button>)}</div>}
-            <div className="investor-mobile-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar</button></div>
-          </div>}
-        </article>;
-      })}<div className="mobile-rate-note">Tasa anual simple: no incluye reinversión.</div></div></>
+            return <Fragment key={investor.id}>
+              <button type="button" className={`investor-row ${expanded ? "expanded" : ""}`} aria-expanded={expanded} onClick={() => setExpandedInvestorId((current) => current === investor.id ? "" : investor.id)}>
+                <span><b>{investor.name}</b></span>
+                <span className="num">{money(metrics.capital, "USD")}</span>
+                <span className="num profit">{money(investor.profitAmount ?? investor.profitUsd, investor.profitCurrency ?? "USD")}</span>
+              </button>
+              {expanded && <div className="investor-detail">
+                <div className="investor-detail-stats">
+                  <span>Total a devolver<b>{money(metrics.capital + investor.profitUsd, "USD")}</b></span>
+                  <span>Ganancia<b>{percent(metrics.totalReturnPercent)}</b></span>
+                  <span>Tasa anual simple<b>{metrics.annualRate === null ? metrics.annualRateStatus : percent(metrics.annualRate)}</b></span>
+                  <span>Plazo<b>{metrics.termDays ? `${Math.round(metrics.termDays)} días` : "—"}</b></span>
+                </div>
+                <div className="investor-contributions">
+                  <span>Aportes (tocá uno para editarlo)</span>
+                  {contributions.length === 0 ? <small>Sin aportes</small> : contributions.map((contribution) => <button type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>
+                    <span>{shortDate(contribution.date)}</span><b>{money(contribution.amount, contribution.currency ?? "USD")}</b>
+                  </button>)}
+                </div>
+                <div className="investor-actions">
+                  <button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button>
+                  <button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar</button>
+                  <button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar</button>
+                </div>
+                <small className="investor-note">Tasa anual simple: ganancia % × 365 ÷ días hasta la venta, sin reinversión.</small>
+              </div>}
+            </Fragment>;
+          })}
+          <div className="investor-row total"><span>Total</span><span className="num">{money(investorCapitalTotal, "USD")}</span><span className="num">{money(investorProfit, "USD")}</span></div>
+        </div>}
+      </section>
     </div>;
   };
 
   const renderCategories = () => (
     <div className="page-content">
-      <button className="text-button back-link" onClick={() => setView("expenses")}>← Volver a Costos</button>
+      <button className="text-button back-link" onClick={() => setView("budgets")}>← Volver al presupuesto</button>
       <SimpleHeading title="Categorías" />
       <section className="manage-card category-catalog">
-        <div className="manage-head"><h2>Categorías de costos</h2><button className="secondary-button" onClick={() => addNamedItem("category")}>＋ Agregar categoría</button></div>
+        <div className="manage-head"><h2>Categorías del presupuesto</h2><button className="secondary-button" onClick={() => addNamedItem("category")}>＋ Agregar categoría</button></div>
         {categories.map((category) => {
           const linked = subcategoriesFor(category.id);
           return <div className="category-catalog-row" key={category.id}>
@@ -815,25 +1026,24 @@ export function ControlObraApp() {
     const group = data.budgetGroups.find((item) => item.id === groupId);
     const offer = group?.offers.find((item) => item.id === offerId);
     if (!group || !offer || group.approvedOfferId) return;
-    const expense: Expense = {
-      id: uid("exp"), date: offer.date, description: `${group.name} — ${offer.supplier}`,
-      categoryId: group.categoryId, subcategoryId: group.subcategoryId, responsible: offer.supplier,
-      amount: offer.amount, currency: offer.currency, rate: offer.rate, kind: "approved", budgetGroupId: group.id,
+    const item: BudgetItem = {
+      id: uid("bitem"), categoryId: group.categoryId, subcategoryId: group.subcategoryId, description: `${group.name} — ${offer.supplier}`,
+      amount: offer.amount, currency: offer.currency, rate: offer.rate, comparisonId: group.id,
     };
     setData((current) => ({
       ...current,
-      budgetGroups: current.budgetGroups.map((item) => item.id === groupId ? { ...item, approvedOfferId: offerId } : item),
-      expenses: [...current.expenses, expense],
+      budgetGroups: current.budgetGroups.map((entry) => entry.id === groupId ? { ...entry, approvedOfferId: offerId } : entry),
+      budgetItems: [...(current.budgetItems ?? []), item],
     }));
-    notify("Presupuesto aprobado y agregado a Costos");
+    notify("Oferta elegida y sumada al presupuesto");
   };
 
   const deleteBudgetGroup = (group: BudgetGroup) => {
     const approved = group.offers.find((offer) => offer.id === group.approvedOfferId);
-    const note = approved ? " El costo aprobado ya registrado se conservará." : "";
-    if (!window.confirm(`¿Eliminar el presupuesto “${group.name}” y todas sus ofertas?${note}`)) return;
+    const note = approved ? " Lo que ya se sumó al presupuesto se conserva." : "";
+    if (!window.confirm(`¿Eliminar la comparación “${group.name}” y todas sus ofertas?${note}`)) return;
     setData((current) => ({ ...current, budgetGroups: current.budgetGroups.filter((item) => item.id !== group.id) }));
-    notify("Presupuesto eliminado");
+    notify("Comparación eliminada");
   };
 
   const renameItem = (collection: "categories" | "subcategories", item: Category) => {
@@ -844,8 +1054,8 @@ export function ControlObraApp() {
   const deleteCreatedItem = (collection: "categories" | "subcategories", item: Category) => {
     const isCategory = collection === "categories";
     const hasReferences = isCategory
-      ? data.expenses.some((entry) => entry.categoryId === item.id) || data.progress.some((entry) => entry.categoryId === item.id) || data.budgetGroups.some((entry) => entry.categoryId === item.id)
-      : data.expenses.some((entry) => entry.subcategoryId === item.id) || data.progress.some((entry) => entry.subcategoryId === item.id) || data.budgetGroups.some((entry) => entry.subcategoryId === item.id);
+      ? data.progress.some((entry) => entry.categoryId === item.id) || data.budgetGroups.some((entry) => entry.categoryId === item.id) || budgetItems.some((entry) => entry.categoryId === item.id)
+      : data.progress.some((entry) => entry.subcategoryId === item.id) || data.budgetGroups.some((entry) => entry.subcategoryId === item.id) || budgetItems.some((entry) => entry.subcategoryId === item.id);
     if (hasReferences) {
       window.alert(`No se puede eliminar “${item.name}” porque ya está usado en movimientos, presupuestos o avances.`);
       return;
@@ -861,7 +1071,7 @@ export function ControlObraApp() {
 
   if (!loaded) return <div className="app-loading"><h1>Control de Obra</h1><p>Preparando tus datos…</p></div>;
 
-  const activeNav = view === "categories" ? "expenses" : view;
+  const activeNav = view === "categories" ? "budgets" : view;
   const saveLabel = saveStatus === "saved" ? "Todo guardado" : saveStatus === "saving" ? "Guardando…" : "Sin conexión, se reintentará";
 
   return (
@@ -878,7 +1088,7 @@ export function ControlObraApp() {
           <button className="rate-chip" onClick={() => setModal("rate")} title={`Cotización del ${shortDate(rateDate)} · tocá para editar`}><span>Dólar oficial</span><b>{money(rate, "ARS")}</b></button>
         </header>
         {view === "home" && renderHome()}
-        {view === "expenses" && renderExpenses()}
+        {view === "payments" && renderPayments()}
         {view === "budgets" && renderBudgets()}
         {view === "investors" && renderInvestors()}
         {view === "categories" && renderCategories()}
@@ -886,15 +1096,24 @@ export function ControlObraApp() {
 
       <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={activeNav === item.id ? "active" : ""} onClick={() => setView(item.id)}><NavIcon name={item.icon} /><small>{item.label}</small></button>)}</nav>
 
-      {modal === "expense" && <ExpenseModal data={data} rate={rate} expense={data.expenses.find((item) => item.id === selectedExpenseId)} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(expense) => {
-        setData((current) => ({ ...current, expenses: current.expenses.some((item) => item.id === expense.id) ? current.expenses.map((item) => item.id === expense.id ? expense : item) : [...current.expenses, expense] }));
-        setModal(null); setSelectedExpenseId(""); notify("Costo guardado");
-      }} />}
-      {modal === "payment" && <PaymentModal data={data} rate={rate} initialExpenseId={selectedExpenseId} remainingForExpense={remainingForExpense} pathName={pathName} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedExpenseId(""); notify("Pago registrado"); }} />}
-      {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
+      {modal === "budgetItem" && <BudgetItemModal data={data} rate={rate} item={budgetItems.find((item) => item.id === selectedBudgetItemId)} defaultCategoryId={budgetCategoryId} addNamedItem={addNamedItem}
+        remove={() => {
+          const item = budgetItems.find((entry) => entry.id === selectedBudgetItemId);
+          if (item && deleteBudgetItem(item)) { setModal(null); setSelectedBudgetItemId(""); }
+        }}
+        close={() => { setModal(null); setSelectedBudgetItemId(""); }}
+        save={(item) => {
+          setData((current) => {
+            const items = current.budgetItems ?? [];
+            return { ...current, budgetItems: items.some((entry) => entry.id === item.id) ? items.map((entry) => entry.id === item.id ? item : entry) : [...items, item] };
+          });
+          setModal(null); setSelectedBudgetItemId(""); setView("budgets"); notify("Presupuesto guardado");
+        }} />}
+      {modal === "payment" && <PaymentModal lines={budgetItems} rateFor={rateForDate} initialLineId={selectedLineId} remainingFor={remainingFor} pathName={pathName} close={() => { setModal(null); setSelectedLineId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedLineId(""); notify("Pago registrado"); }} />}
+      {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setView("budgets"); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} history={data.exchangeRateHistory ?? []} close={() => setModal(null)} save={(nextRate, nextDate) => { const nextSource = "Cotización ajustada manualmente"; setRate(nextRate); setRateDate(nextDate); setRateSource(nextSource); setData((current) => ({ ...current, exchangeRateHistory: updateRateHistory(current.exchangeRateHistory ?? [], { date: nextDate, rate: nextRate, source: nextSource }) })); setModal(null); notify("Cotización actualizada"); }} />}
-      {modal === "investmentPlan" && <InvestmentPlanModal field={investmentField} plan={data.investmentPlan} investorCapitalUsd={investorCapitalTotal} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
+      {modal === "investmentPlan" && <InvestmentPlanModal field={investmentField} plan={data.investmentPlan} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
       {modal === "investor" && <InvestorModal rate={rate} investor={selectedInvestor} close={() => { setModal(null); setSelectedInvestorId(""); }} save={(investor) => {
         setData((current) => ({ ...current, investors: current.investors.some((item) => item.id === investor.id) ? current.investors.map((item) => item.id === investor.id ? investor : item) : [...current.investors, investor] }));
         setModal(null); setSelectedInvestorId(""); notify("Inversor guardado");
@@ -938,6 +1157,16 @@ function SubcategorySelect({ categoryId, value, setValue, categories, subcategor
   </select></label>;
 }
 
+// Mano de obra / Materiales / Adicionales siempre disponibles, más las subcategorías propias de la categoría.
+// Todo lo presupuestado es Mano de obra, Materiales o Adicionales.
+const typeOptions = (subcategories: Subcategory[]) => subcategories.filter((item) => !item.archived && defaultSubcategoryIds.has(item.id));
+
+function SubcategoryOptions({ options, value, setValue, error = false }: { options: Subcategory[]; value: string; setValue: (value: string) => void; error?: boolean }) {
+  return <div className="field span-2"><span>Tipo</span><div className={`choice-toggle ${error ? "invalid" : ""}`} role="radiogroup" aria-label="Tipo">
+    {options.map((item) => <button type="button" role="radio" aria-checked={value === item.id} key={item.id} className={value === item.id ? "active" : ""} onClick={() => setValue(item.id)}>{item.name}</button>)}
+  </div>{error && <small className="field-error">Elegí si es mano de obra, materiales o adicionales.</small>}</div>;
+}
+
 function AmountField({ label, currency, setCurrency, amount, setAmount, invalid = false, className = "span-2" }: { label: string; currency: Currency; setCurrency: (value: Currency) => void; amount: string; setAmount: (value: string) => void; invalid?: boolean; className?: string }) {
   return <div className={`amount-field ${className}`}><span>{label}</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`${label} en ${currency}`} required invalid={invalid} value={amount} setValue={setAmount} placeholder="0" /></label></div></div>;
 }
@@ -952,43 +1181,38 @@ function MoreOptions({ open, setOpen, summary, children }: { open: boolean; setO
   return <button type="button" className="more-options span-2" onClick={() => setOpen(true)}><span>＋ Más opciones</span><small>{summary}</small></button>;
 }
 
-function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCategory, close, save }: { data: AppState; rate: number; expense?: Expense; addNamedItem: (kind: "category" | "subcategory") => string; addSubcategoryForCategory: (categoryId: string) => string; close: () => void; save: (expense: Expense) => void }) {
-  const lastCurrency = data.expenses[data.expenses.length - 1]?.currency ?? "ARS";
-  const [date, setDate] = useState(expense?.date ?? today());
-  const [description, setDescription] = useState(expense?.description ?? "");
-  const [categoryId, setCategoryId] = useState(expense?.categoryId ?? "");
-  const [subcategoryId, setSubcategoryId] = useState(expense?.subcategoryId ?? "");
-  const [responsible, setResponsible] = useState(expense?.responsible ?? "");
-  const [amount, setAmount] = useState(expense?.amount?.toString() ?? "");
-  const [currency, setCurrency] = useState<Currency>(expense?.currency ?? lastCurrency);
-  const [showMore, setShowMore] = useState(Boolean(expense));
-  const selectedRate = expense?.rate ?? rate;
-  const hasSubcategories = categoryId ? linkedSubcategories(categoryId, data.categories, data.subcategories).length > 0 : false;
-  const submit = (event: FormEvent) => {
+function BudgetItemModal({ data, rate, item, defaultCategoryId, addNamedItem, remove, close, save }: { data: AppState; rate: number; item?: BudgetItem; defaultCategoryId?: string; addNamedItem: (kind: "category" | "subcategory") => string; remove: () => void; close: () => void; save: (item: BudgetItem) => void }) {
+  const options = typeOptions(data.subcategories);
+  const [amount, setAmount] = useState(item?.amount?.toString() ?? "");
+  const [currency, setCurrency] = useState<Currency>(item?.currency ?? "ARS");
+  const [categoryId, setCategoryId] = useState(item?.categoryId ?? defaultCategoryId ?? "");
+  const [subcategoryId, setSubcategoryId] = useState(options.some((option) => option.id === item?.subcategoryId) ? item?.subcategoryId ?? "" : "");
+  const [description, setDescription] = useState(item?.description ?? "");
+  const [typeMissing, setTypeMissing] = useState(false);
+  const selectedRate = item?.rate ?? rate;
+  return <Modal title={item ? "Editar presupuesto" : "Agregar al presupuesto"} close={close}><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
+    if (!subcategoryId) { setTypeMissing(true); return; }
     if (Number(amount) <= 0) return;
-    save({ id: expense?.id ?? uid("exp"), date, description: description.trim(), categoryId, subcategoryId, responsible: responsible.trim(), amount: Number(amount), currency, rate: selectedRate, kind: expense?.kind ?? "manual", budgetGroupId: expense?.budgetGroupId });
-  };
-  return <Modal title={expense ? "Editar costo" : "Ingresar costo"} close={close}><form className="form-grid" onSubmit={submit}>
-    <AmountField label="Monto" currency={currency} setCurrency={setCurrency} amount={amount} setAmount={setAmount} />
-    <ConversionHint amount={amount} currency={currency} rate={selectedRate} />
-    <CategorySelect className={hasSubcategories ? undefined : "span-2"} label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={data.categories} onNew={() => addNamedItem("category")} />
-    {hasSubcategories && <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={data.categories} subcategories={data.subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />}
-    <label className="span-2"><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
-    <MoreOptions open={showMore} setOpen={setShowMore} summary={`Fecha: ${date === today() ? "hoy" : shortDate(date)} · Responsable`}>
-      <label><span>Fecha</span><DateInput required value={date} setValue={setDate} /></label>
-      <label><span>Responsable (opcional)</span><input value={responsible} onChange={(event) => setResponsible(event.target.value)} placeholder="Arquitecto, albañil…" /></label>
-    </MoreOptions>
-    <FormActions close={close} label={expense ? "Guardar cambios" : "Guardar costo"} />
+    save({ id: item?.id ?? uid("bitem"), categoryId, subcategoryId, description: description.trim(), amount: Number(amount), currency, rate: selectedRate, comparisonId: item?.comparisonId });
+  }}>
+    <AmountField label="Monto que pensás gastar" currency={currency} setCurrency={setCurrency} amount={amount} setAmount={setAmount} />
+    {currency === "USD" && <ConversionHint amount={amount} currency={currency} rate={selectedRate} />}
+    <CategorySelect className="span-2" label="Rubro" value={categoryId} setValue={setCategoryId} items={data.categories} onNew={() => addNamedItem("category")} />
+    <SubcategoryOptions options={options} value={subcategoryId} setValue={(value) => { setSubcategoryId(value); setTypeMissing(false); }} error={typeMissing} />
+    <label className="span-2"><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: revoque y pintura del living" /></label>
+    <FormActions close={close} label={item ? "Guardar cambios" : "Agregar"} deleteLabel={item ? "Eliminar" : undefined} onDelete={remove} />
   </form></Modal>;
 }
 
-function InlinePaymentForm({ expense, rate, remaining, payments, removePayment, edit, remove, save }: { expense: Expense; rate: number; remaining: number; payments: Payment[]; removePayment: (payment: Payment) => void; edit?: () => void; remove?: () => void; save: (payment: Payment) => void }) {
+function InlinePaymentForm({ expense, rateFor, remaining, payments, removePayment, edit, remove, save }: { expense: Payable; rateFor: (date: string) => number; remaining: number; payments: Payment[]; removePayment: (payment: Payment) => void; edit?: () => void; remove?: () => void; save: (payment: Payment) => void }) {
   const [partial, setPartial] = useState(false);
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<Currency>(expense.currency);
+  const rate = rateFor(date);
+  const todayRate = rateFor(today());
   const maxAmount = currency === expense.currency
     ? remaining
     : expense.currency === "ARS"
@@ -1008,11 +1232,9 @@ function InlinePaymentForm({ expense, rate, remaining, payments, removePayment, 
     setAmount("");
     setDescription("");
   };
-  const payFull = () => save({ id: uid("pay"), expenseId: expense.id, date: today(), description: "", amount: remaining, currency: expense.currency, rate });
+  const payFull = () => save({ id: uid("pay"), expenseId: expense.id, date: today(), description: "", amount: remaining, currency: expense.currency, rate: todayRate });
   const details = [
-    expense.description && ["Descripción", expense.description],
     expense.responsible && ["Responsable", expense.responsible],
-    ["Equivale a", expense.currency === "ARS" ? money(expense.amount / expense.rate, "USD") : money(expense.amount * expense.rate, "ARS")],
   ].filter(Boolean) as string[][];
 
   return <div className="inline-payment-panel">
@@ -1021,20 +1243,20 @@ function InlinePaymentForm({ expense, rate, remaining, payments, removePayment, 
       <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar</button><button type="button" className="danger-button compact" onClick={remove}>Eliminar</button></div>
     </div>}
     {payments.length > 0 && <div className="expense-payments">
-      <span>Pagos de este costo</span>
+      <span>Pagos realizados</span>
       {payments.slice().sort((a, b) => a.date.localeCompare(b.date)).map((payment) => <div key={payment.id}>
         <small>{shortDate(payment.date)}{payment.description ? ` · ${payment.description}` : ""}</small>
-        <b>{money(payment.amount, payment.currency)}</b>
+        <b>{money(payment.amount, payment.currency)}{payment.currency === "ARS" && <small className="usd-note">US$ {usdPlain(payment.amount / payment.rate)} · dólar {money(payment.rate, "ARS")}</small>}</b>
         <button type="button" className="link-danger" onClick={() => removePayment(payment)}>Eliminar</button>
       </div>)}
     </div>}
-    {remaining <= 0.005 ? <div className="inline-payment-complete">✓ Este costo ya está pagado.</div> : !partial ? <div className="full-payment-choice">
-      <div><span>Falta pagar</span><b>{money(remaining, expense.currency)}</b></div>
+    {remaining <= 0.005 ? <div className="inline-payment-complete">✓ Esto ya está pagado.</div> : !partial ? <div className="full-payment-choice">
+      <div><span>Falta pagar</span><b>{money(remaining, expense.currency)}</b>{expense.currency === "ARS" && <small>Pagado hoy son US$ {usdPlain(remaining / todayRate)} (dólar {money(todayRate, "ARS")})</small>}</div>
       <button type="button" className="secondary-button" onClick={() => setPartial(true)}>Pagar una parte</button>
       <button type="button" className="primary-button" onClick={payFull}>Pagar todo</button>
     </div> : <form className="form-grid inline-payment-form" onSubmit={submit}>
       <AmountField label="Monto pagado" currency={currency} setCurrency={(value) => { setCurrency(value); setAmount(""); }} amount={amount} setAmount={setAmount} invalid={tooMuch} />
-      {amount && Number(amount) > 0 && <p className={`conversion-hint span-2 ${tooMuch ? "error" : ""}`}>{tooMuch ? <>Supera lo que falta pagar. Máximo: <b>{money(maxAmount, currency)}</b></> : <>Se descuentan {money(debitAmount, expense.currency)} del saldo.</>}</p>}
+      {amount && Number(amount) > 0 && <p className={`conversion-hint span-2 ${tooMuch ? "error" : ""}`}>{tooMuch ? <>Supera lo que falta pagar. Máximo: <b>{money(maxAmount, currency)}</b></> : <>Se descuentan {money(debitAmount, expense.currency)} del saldo.{currency === "ARS" && <> Se pasa a <b>US$ {usdPlain(Number(amount) / rate)}</b> con el dólar del {date === today() ? "día de hoy" : shortDate(date)} ({money(rate, "ARS")}).</>}</>}</p>}
       <label><span>Fecha del pago</span><DateInput required value={date} setValue={setDate} /></label>
       <label><span>Nota (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia" /></label>
       <div className="form-actions span-2"><button type="button" className="secondary-button" onClick={() => setPartial(false)}>Cancelar</button><button className="primary-button" type="submit">Guardar pago</button></div>
@@ -1042,12 +1264,12 @@ function InlinePaymentForm({ expense, rate, remaining, payments, removePayment, 
   </div>;
 }
 
-function PaymentModal({ data, rate, initialExpenseId, remainingForExpense, pathName, close, save }: { data: AppState; rate: number; initialExpenseId: string; remainingForExpense: (expense: Expense) => number; pathName: (categoryId: string, subcategoryId: string) => string; close: () => void; save: (payment: Payment) => void }) {
-  const [expenseId, setExpenseId] = useState(initialExpenseId);
-  const expense = data.expenses.find((item) => item.id === expenseId);
+function PaymentModal({ lines, rateFor, initialLineId, remainingFor, pathName, close, save }: { lines: BudgetItem[]; rateFor: (date: string) => number; initialLineId: string; remainingFor: (line: Payable) => number; pathName: (categoryId: string, subcategoryId: string) => string; close: () => void; save: (payment: Payment) => void }) {
+  const [lineId, setLineId] = useState(initialLineId);
+  const line = lines.find((item) => item.id === lineId);
   return <Modal title="Registrar pago" close={close}><div className="form-grid">
-    <label className="span-2"><span>¿Qué costo pagaste?</span><select required value={expenseId} onChange={(event) => setExpenseId(event.target.value)}><option value="">Elegir costo…</option>{data.expenses.filter((item) => remainingForExpense(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{item.description || pathName(item.categoryId, item.subcategoryId)} · falta {money(remainingForExpense(item), item.currency)}</option>)}</select></label>
-    {expense && <div className="span-2"><InlinePaymentForm key={expense.id} expense={expense} rate={rate} remaining={remainingForExpense(expense)} payments={[]} removePayment={() => undefined} save={save} /></div>}
+    <label className="span-2"><span>¿Qué pagaste?</span><select required value={lineId} onChange={(event) => setLineId(event.target.value)}><option value="">Elegir del presupuesto…</option>{lines.filter((item) => remainingFor(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{[pathName(item.categoryId, item.subcategoryId), item.description].filter(Boolean).join(" · ")} · falta {money(remainingFor(item), item.currency)}</option>)}</select></label>
+    {line && <div className="span-2"><InlinePaymentForm key={line.id} expense={line} rateFor={rateFor} remaining={remainingFor(line)} payments={[]} removePayment={() => undefined} save={save} /></div>}
   </div></Modal>;
 }
 
@@ -1061,12 +1283,13 @@ function ProgressModal({ categories, subcategories, addSubcategoryForCategory, c
   </form></Modal>;
 }
 
-function BudgetModal({ categories, subcategories, addNamedItem, addSubcategoryForCategory, close, save }: { categories: Category[]; subcategories: Subcategory[]; addNamedItem: (kind: "category" | "subcategory") => string; addSubcategoryForCategory: (categoryId: string) => string; close: () => void; save: (group: BudgetGroup) => void }) {
+function BudgetModal({ categories, subcategories, addNamedItem, close, save }: { categories: Category[]; subcategories: Subcategory[]; addNamedItem: (kind: "category" | "subcategory") => string; close: () => void; save: (group: BudgetGroup) => void }) {
   const [name, setName] = useState(""); const [categoryId, setCategoryId] = useState(""); const [subcategoryId, setSubcategoryId] = useState("");
-  return <Modal title="Nueva comparación" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); save({ id: uid("budget"), name: name.trim(), categoryId, subcategoryId, offers: [] }); }}>
+  const [typeMissing, setTypeMissing] = useState(false);
+  return <Modal title="Nueva comparación" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (!subcategoryId) { setTypeMissing(true); return; } save({ id: uid("budget"), name: name.trim(), categoryId, subcategoryId, offers: [] }); }}>
     <label className="span-2"><span>¿Qué querés comparar?</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej: sanitarios para el baño" /></label>
-    <CategorySelect label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={categories} onNew={() => addNamedItem("category")} />
-    <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={categories} subcategories={subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />
+    <CategorySelect className="span-2" label="Rubro" value={categoryId} setValue={setCategoryId} items={categories} onNew={() => addNamedItem("category")} />
+    <SubcategoryOptions options={typeOptions(subcategories)} value={subcategoryId} setValue={(value) => { setSubcategoryId(value); setTypeMissing(false); }} error={typeMissing} />
     <FormActions close={close} label="Crear y agregar oferta" />
   </form></Modal>;
 }
@@ -1078,7 +1301,7 @@ function OfferModal({ rate, group, close, save }: { rate: number; group?: Budget
   return <Modal title={`Agregar oferta · ${group.name}`} close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (Number(amount) <= 0) return; save({ id: uid("offer"), supplier: supplier.trim(), date, description: description.trim(), amount: Number(amount), currency, rate }); }}>
     <label className="span-2"><span>Proveedor o empresa</span><input required value={supplier} onChange={(event) => setSupplier(event.target.value)} placeholder="Nombre del proveedor" /></label>
     <AmountField label="Monto total" currency={currency} setCurrency={setCurrency} amount={amount} setAmount={setAmount} />
-    <ConversionHint amount={amount} currency={currency} rate={rate} />
+    {currency === "USD" && <ConversionHint amount={amount} currency={currency} rate={rate} />}
     <MoreOptions open={showMore} setOpen={setShowMore} summary={`Fecha: ${date === today() ? "hoy" : shortDate(date)} · Descripción`}>
       <label><span>Fecha</span><DateInput required value={date} setValue={setDate} /></label>
       <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Detalle breve" /></label>
@@ -1087,32 +1310,31 @@ function OfferModal({ rate, group, close, save }: { rate: number; group?: Budget
   </form></Modal>;
 }
 
-function InvestmentPlanModal({ field, plan, investorCapitalUsd, close, save }: { field: "property" | "remodel" | "sale"; plan: InvestmentPlan; investorCapitalUsd: number; close: () => void; save: (plan: InvestmentPlan) => void }) {
+function InvestmentPlanModal({ field, plan, close, save }: { field: PlanField; plan: InvestmentPlan; close: () => void; save: (plan: InvestmentPlan) => void }) {
   const [propertyValue, setPropertyValue] = useState(plan.propertyValueUsd ? plan.propertyValueUsd.toString() : "");
   const [propertyCommissionPercent, setPropertyCommissionPercent] = useState(plan.propertyCommissionPercent.toString());
-  const [ownCapital, setOwnCapital] = useState(plan.ownCapitalUsd ? plan.ownCapitalUsd.toString() : "");
-  const [ownCapitalManual, setOwnCapitalManual] = useState(plan.ownCapitalManual);
+  const [ownMoney, setOwnMoney] = useState(plan.ownCapitalUsd ? plan.ownCapitalUsd.toString() : "");
   const [remodelBudget, setRemodelBudget] = useState(plan.remodelBudgetUsd ? plan.remodelBudgetUsd.toString() : "");
   const [salePrice, setSalePrice] = useState(plan.projectedSalePriceUsd ? plan.projectedSalePriceUsd.toString() : "");
   const [purchaseDate, setPurchaseDate] = useState(plan.purchaseDate);
   const [saleDate, setSaleDate] = useState(plan.projectedSaleDate);
   const commissionPercent = Math.max(0, Number(propertyCommissionPercent) || 0);
-  const propertyCommission = (Number(propertyValue) || 0) * (commissionPercent / 100);
   const propertyTotal = propertyCostWithCommission(Number(propertyValue) || 0, commissionPercent);
-  const calculatedOwnCapital = Math.max(0, propertyTotal + (Number(remodelBudget) || 0) - investorCapitalUsd);
-  const titles = { property: "Valor de la propiedad", remodel: "Remodelación proyectada", sale: "Venta proyectada" };
-  return <Modal title={titles[field]} close={close} wide><form className="form-grid" onSubmit={(event) => {
+  const titles: Record<PlanField, string> = { property: "Valor de la propiedad", remodel: "Remodelación proyectada", sale: "Venta proyectada", own: "Plata propia" };
+  return <Modal title={titles[field]} close={close}><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
-    save({ propertyValueUsd: Number(propertyValue) || 0, propertyCommissionPercent: commissionPercent, ownCapitalUsd: ownCapitalManual ? Number(ownCapital) || 0 : calculatedOwnCapital, ownCapitalManual, remodelBudgetUsd: Number(remodelBudget) || 0, projectedSalePriceUsd: Number(salePrice) || 0, purchaseDate, projectedSaleDate: saleDate });
+    save({ ...plan, propertyValueUsd: Number(propertyValue) || 0, propertyCommissionPercent: commissionPercent, ownCapitalUsd: Number(ownMoney) || 0, ownCapitalManual: true, remodelBudgetUsd: Number(remodelBudget) || 0, projectedSalePriceUsd: Number(salePrice) || 0, purchaseDate, projectedSaleDate: saleDate });
   }}>
-    {field === "property" && <><label><span>Valor de la propiedad (USD, sin comisiones)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="USD" /></label><label><span>Comisiones (%)</span><input type="number" min="0" step="0.1" value={propertyCommissionPercent} onChange={(event) => setPropertyCommissionPercent(event.target.value)} /></label><label><span>Fecha de compra de la propiedad</span><DateInput value={purchaseDate} setValue={setPurchaseDate} /></label><div className="property-total-preview span-2"><span>Costo total de la propiedad</span><strong>{money(propertyTotal, "USD")}</strong><small>{money(Number(propertyValue) || 0, "USD")} valor + {money(propertyCommission, "USD")} comisiones ({percent(commissionPercent)}).</small></div></>}
-    <div className="calculated-own-capital span-2"><span>Capital propio calculado</span><strong>{money(calculatedOwnCapital, "USD")}</strong><small>Propiedad con {percent(commissionPercent)} de comisiones + remodelación proyectada − {money(investorCapitalUsd, "USD")} recibidos de inversores.</small></div>
-    <label className="manual-own-toggle span-2"><input type="checkbox" checked={ownCapitalManual} onChange={(event) => { setOwnCapitalManual(event.target.checked); if (event.target.checked && !ownCapital) setOwnCapital(calculatedOwnCapital.toString()); }} /><span>Guardar un estimado de capital propio solo como referencia</span></label>
-    {ownCapitalManual && <label className="span-2"><span>Estimado de capital propio (USD)</span><FormattedAmountInput value={ownCapital} setValue={setOwnCapital} placeholder="USD" /></label>}
-    {ownCapitalManual && <div className="source-note span-2"><span>Solo referencia</span><b>Los cálculos de ganancia y rendimiento seguirán usando el capital propio calculado automáticamente.</b></div>}
-    {field === "remodel" && <label className="span-2"><span>Presupuesto proyectado de remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>}
-    {field === "sale" && <><label><span>Precio proyectado de venta (USD)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="USD" /></label><label><span>Fecha proyectada de venta</span><DateInput value={saleDate} setValue={setSaleDate} /></label></>}
-    <FormActions close={close} label="Guardar valores" />
+    {field === "property" && <>
+      <label className="span-2"><span>Valor de la propiedad (US$, sin comisiones)</span><FormattedAmountInput value={propertyValue} setValue={setPropertyValue} placeholder="US$" /></label>
+      <label><span>Comisiones (%)</span><input type="number" min="0" step="0.1" value={propertyCommissionPercent} onChange={(event) => setPropertyCommissionPercent(event.target.value)} /></label>
+      <label><span>Fecha de compra</span><DateInput value={purchaseDate} setValue={setPurchaseDate} /></label>
+      <p className="conversion-hint span-2">Precio total con comisiones: <b>{money(propertyTotal, "USD")}</b></p>
+    </>}
+    {field === "remodel" && <label className="span-2"><span>Cuánto estimás gastar en la remodelación (US$)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="US$" /></label>}
+    {field === "sale" && <><label><span>Precio de venta estimado (US$)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="US$" /></label><label><span>Fecha estimada de venta</span><DateInput value={saleDate} setValue={setSaleDate} /></label></>}
+    {field === "own" && <label className="span-2"><span>Cuánta plata propia pusiste (US$)</span><FormattedAmountInput value={ownMoney} setValue={setOwnMoney} placeholder="US$" /></label>}
+    <FormActions close={close} label="Guardar" />
   </form></Modal>;
 }
 
@@ -1124,6 +1346,7 @@ function InvestorModal({ investor, rate, close, save }: { investor?: Investor; r
   const [firstDate, setFirstDate] = useState(today());
   const [firstAmount, setFirstAmount] = useState("");
   const [firstCurrency, setFirstCurrency] = useState<Currency>("USD");
+  const [showMore, setShowMore] = useState(false);
   const profitConversionRate = investor?.profitCurrency === profitCurrency ? investor.profitRate ?? rate : rate;
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1141,9 +1364,12 @@ function InvestorModal({ investor, rate, close, save }: { investor?: Investor; r
   };
   return <Modal title={investor ? "Editar inversor" : "Nuevo inversor"} close={close}><form className="form-grid" onSubmit={submit}>
     <label className="span-2"><span>Nombre del inversor</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Nombre y apellido" /></label>
-    {!investor && <><AmountField label="Primer aporte" currency={firstCurrency} setCurrency={setFirstCurrency} amount={firstAmount} setAmount={setFirstAmount} /><label className="span-2"><span>Fecha del primer aporte</span><DateInput required value={firstDate} setValue={setFirstDate} /></label></>}
-    <AmountField label="Ganancia acordada" currency={profitCurrency} setCurrency={setProfitCurrency} amount={profit} setAmount={setProfit} />
-    <p className="conversion-hint span-2">Se le devuelve lo que aportó más esta ganancia.{profitCurrency === "ARS" && profit ? ` Equivale a ${money(Number(profit) / profitConversionRate, "USD")}.` : ""}</p>
+    {!investor && <AmountField label="Cuánto invirtió" currency={firstCurrency} setCurrency={setFirstCurrency} amount={firstAmount} setAmount={setFirstAmount} />}
+    <AmountField label="Ganancia que le vas a dar" currency={profitCurrency} setCurrency={setProfitCurrency} amount={profit} setAmount={setProfit} />
+    <p className="conversion-hint span-2">Al final se le devuelve lo que invirtió más esta ganancia.{profitCurrency === "ARS" && profit ? ` Equivale a ${money(Number(profit) / profitConversionRate, "USD")}.` : ""}</p>
+    {!investor && <MoreOptions open={showMore} setOpen={setShowMore} summary={`Fecha en que invirtió: ${firstDate === today() ? "hoy" : shortDate(firstDate)}`}>
+      <label className="span-2"><span>Fecha en que invirtió</span><DateInput required value={firstDate} setValue={setFirstDate} /></label>
+    </MoreOptions>}
     <FormActions close={close} label={investor ? "Guardar cambios" : "Guardar inversor"} />
   </form></Modal>;
 }
