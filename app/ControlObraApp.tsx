@@ -79,7 +79,7 @@ type AppState = {
   investmentPlan: InvestmentPlan;
   exchangeRateHistory?: ExchangeRateRecord[];
 };
-type View = "home" | "expenses" | "payments" | "progress" | "budgets" | "categories" | "investors";
+type View = "home" | "expenses" | "progress" | "budgets" | "categories" | "investors";
 type ModalName = "expense" | "payment" | "progress" | "budget" | "offer" | "rate" | "investor" | "contribution" | "investmentPlan" | null;
 
 const emptyInvestmentPlan: InvestmentPlan = {
@@ -254,12 +254,23 @@ function DateInput({ value, setValue, required = false, ariaLabel }: { value: st
   return <span className={`date-input ${isToday ? "is-today" : ""}`}><input aria-label={ariaLabel} required={required} type="date" value={value} onChange={(event) => setValue(event.target.value)} />{isToday && <span className="date-today-label">Hoy</span>}</span>;
 }
 
-const nav: Array<{ id: View; label: string; icon: string }> = [
-  { id: "home", label: "Resumen", icon: "⌂" },
-  { id: "expenses", label: "Costos", icon: "$" },
-  { id: "payments", label: "Pagos", icon: "✓" },
-  { id: "budgets", label: "Presupuestos", icon: "≡" },
-  { id: "investors", label: "Inversores", icon: "↗" },
+type IconName = "home" | "expenses" | "budgets" | "investors";
+const iconPaths: Record<IconName, ReactNode> = {
+  home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
+  expenses: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></>,
+  budgets: <><path d="M9 4h6v3H9z" /><path d="M7 5H5v16h14V5h-2" /><path d="M8.5 12h7M8.5 16h4.5" /></>,
+  investors: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5" /><circle cx="17" cy="9" r="2.5" /><path d="M16.5 14.5c2.4.2 4.2 1.9 5 5" /></>,
+};
+
+function NavIcon({ name }: { name: IconName }) {
+  return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{iconPaths[name]}</svg>;
+}
+
+const nav: Array<{ id: View; label: string; icon: IconName }> = [
+  { id: "home", label: "Resumen", icon: "home" },
+  { id: "expenses", label: "Costos", icon: "expenses" },
+  { id: "budgets", label: "Presupuestos", icon: "budgets" },
+  { id: "investors", label: "Inversores", icon: "investors" },
 ];
 
 function Modal({ title, close, children, wide = false }: { title: string; close: () => void; children: ReactNode; wide?: boolean }) {
@@ -267,10 +278,7 @@ function Modal({ title, close, children, wide = false }: { title: string; close:
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
       <section className={`modal-card ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
-          <div>
-            <span className="eyebrow">Control de Obra</span>
-            <h2>{title}</h2>
-          </div>
+          <h2>{title}</h2>
           <button className="icon-button" onClick={close} aria-label="Cerrar">×</button>
         </div>
         {children}
@@ -308,6 +316,7 @@ export function ControlObraApp() {
   const [selectedContributionId, setSelectedContributionId] = useState<string>("");
   const [expandedInvestorId, setExpandedInvestorId] = useState<string>("");
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<string>("all");
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
   const [investmentField, setInvestmentField] = useState<"property" | "remodel" | "sale">("property");
   const [rate, setRate] = useState(1500);
   const [rateDate, setRateDate] = useState(today());
@@ -418,11 +427,6 @@ export function ControlObraApp() {
     window.setTimeout(() => setToast(""), 2600);
   };
 
-  const quickOpen = (nextModal: ModalName, nextView?: View) => {
-    if (nextView) setView(nextView);
-    setModal(nextModal);
-  };
-
   const addNamedItem = (kind: "category" | "subcategory") => {
     const label = kind === "category" ? "categoría" : "subcategoría";
     const name = window.prompt(`Nombre de la nueva ${label}`)?.trim();
@@ -469,147 +473,123 @@ export function ControlObraApp() {
     notify("Pago eliminado");
   };
 
-  const renderHome = () => {
-    const plan = data.investmentPlan;
-    const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
-    const propertyCommissionUsd = plan.propertyValueUsd * (plan.propertyCommissionPercent / 100);
-    const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent);
-    const progressBySubcategory = (name: string) => {
-      const items = data.expenses.filter((item) => subcategoryName(item.subcategoryId) === name);
-      const total = items.reduce((sum, item) => sum + toArs(item.amount, item.currency, item.rate), 0);
-      const paid = items.reduce((sum, item) => sum + toArs(paymentForExpense(item), item.currency, item.rate), 0);
-      return { total, paid, percent: total ? paid * 100 / total : 0 };
-    };
-    const labor = progressBySubcategory("Mano de obra"); const materials = progressBySubcategory("Materiales");
-    return <div className="page-content home-view">
-      <section className="welcome-row">
-        <div><h1>Resumen de la obra</h1></div>
-        <button className="primary-button large" onClick={() => quickOpen("expense")}>＋ Ingresar costo</button>
-      </section>
+  const openPaymentModal = () => {
+    if (!data.expenses.some((expense) => remainingForExpense(expense) > 0.005)) {
+      notify("No hay costos con saldo pendiente");
+      return;
+    }
+    setModal("payment");
+  };
 
-      <section className="investment-plan-panel home-plan-panel">
-        <div className="investment-plan-head"><div><h2>Inversión y venta</h2></div></div>
-        <div className="investment-plan-grid">
-          <article className="clickable-property-card" tabIndex={0} role="button" onClick={() => { setInvestmentField("property"); setModal("investmentPlan"); }}><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{money(plan.propertyValueUsd, "USD")} + {money(propertyCommissionUsd, "USD")} en comisiones ({percent(plan.propertyCommissionPercent)})</small><small>{plan.purchaseDate ? `Compra: ${shortDate(plan.purchaseDate)}` : "Falta fecha de compra"} · tocar para editar</small></article>
-          <article className={`clickable-property-card ${plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "budget-alert" : ""}`} tabIndex={0} role="button" onClick={() => { setInvestmentField("remodel"); setModal("investmentPlan"); }}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : "Dentro de lo proyectado"}</small></article>
-          <article className="sale clickable-property-card" tabIndex={0} role="button" onClick={() => { setInvestmentField("sale"); setModal("investmentPlan"); }}><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Venta estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></article>
+  const renderHome = () => (
+    <div className="page-content home-view">
+      <header className="simple-heading">
+        <h1>Resumen</h1>
+        <div className="heading-actions">
+          <button className="secondary-button large" onClick={openPaymentModal}>Registrar pago</button>
+          <button className="primary-button large" onClick={() => setModal("expense")}>＋ Ingresar costo</button>
         </div>
-      </section>
+      </header>
 
       <section className="summary-grid">
-        <article className="summary-card featured">
-          <div className="summary-icon">$</div>
-          <span>Costo de remodelación</span>
-          <strong>{money(totals.committedArs, "ARS")}</strong>
-          <small>{money(totals.committedUsd, "USD")} · cotizaciones históricas</small>
-        </article>
         <article className="summary-card">
-          <div className="summary-icon green">✓</div>
-          <span>Total pagado</span>
+          <span>Costo total de la obra</span>
+          <strong>{money(totals.committedArs, "ARS")}</strong>
+          <small>{money(totals.committedUsd, "USD")}</small>
+        </article>
+        <article className="summary-card paid">
+          <span>Pagado</span>
           <strong>{money(totals.paidArs, "ARS")}</strong>
           <small>{money(totals.paidUsd, "USD")}</small>
         </article>
-        <article className="summary-card">
-          <div className="summary-icon amber">↗</div>
-          <span>Saldo pendiente</span>
+        <article className="summary-card pending">
+          <span>Falta pagar</span>
           <strong>{money(totals.remainingArs, "ARS")}</strong>
           <small>{money(totals.remainingUsd, "USD")}</small>
         </article>
       </section>
 
-      <section className="dashboard-grid">
-        <article className="panel payment-panel">
-          <div className="panel-head">
-            <div><span className="eyebrow">Pagos</span><h2>Avance financiero</h2></div>
-            <strong className="big-percent">{Math.round(totals.paidPercent)}%</strong>
-          </div>
-          <ProgressBar value={totals.paidPercent} tone="green" />
-          <div className="split-labels">
-            <span><b>{money(totals.paidArs, "ARS")}</b> pagado</span>
-            <span><b>{money(totals.remainingArs, "ARS")}</b> pendiente</span>
-          </div>
-          <div className="financial-breakdown"><div><span>Mano de obra <b>{Math.round(labor.percent)}%</b></span><ProgressBar value={labor.percent} tone="blue" /><small>{money(labor.paid, "ARS")} de {money(labor.total, "ARS")}</small></div><div><span>Materiales <b>{Math.round(materials.percent)}%</b></span><ProgressBar value={materials.percent} tone="amber" /><small>{money(materials.paid, "ARS")} de {money(materials.total, "ARS")}</small></div></div>
-          <button className="secondary-button full" onClick={() => quickOpen("payment", "payments")}>Registrar un pago</button>
-        </article>
-
-        <article className="panel home-actions-panel">
-          <h2>Acciones principales</h2>
-          <div className="home-actions">
-            <button className="secondary-button" onClick={() => setView("expenses")}>Revisar costos</button>
-            <button className="secondary-button" onClick={() => setView("payments")}>Registrar pago</button>
-            <button className="secondary-button" onClick={() => setModal("budget")}>Nuevo presupuesto</button>
-          </div>
-        </article>
+      <section className="panel payment-panel">
+        <div className="panel-head">
+          <h2>Avance de pagos</h2>
+          <strong className="big-percent">{Math.round(totals.paidPercent)}%</strong>
+        </div>
+        <ProgressBar value={totals.paidPercent} tone="green" />
+        <p className="panel-note">{data.expenses.length ? "Porcentaje pagado sobre el total de costos cargados." : "Cuando cargues costos y pagos, acá vas a ver cuánto se lleva pagado."}</p>
+        <button className="text-button" onClick={() => setView("expenses")}>Ver todos los costos →</button>
       </section>
-
     </div>
-  };
+  );
 
   const renderExpenses = () => {
+    const isPending = (expense: Expense) => remainingForExpense(expense) > 0.005;
+    const pendingCount = data.expenses.filter(isPending).length;
     const filteredExpenses = data.expenses
-      .filter((expense) => expenseCategoryFilter === "all" || expense.categoryId === expenseCategoryFilter)
+      .filter((expense) => expenseCategoryFilter === "all" || (expenseCategoryFilter === "pending" ? isPending(expense) : expense.categoryId === expenseCategoryFilter))
       .slice()
       .sort((a, b) => b.date.localeCompare(a.date));
     const remodelBudget = data.investmentPlan.remodelBudgetUsd;
     const remodelDifference = totals.committedUsd - remodelBudget;
+    const toggleExpense = (expense: Expense) => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id);
     const expenseDetails = (expense: Expense, remaining: number) => <InlinePaymentForm
       expense={expense}
       rate={rate}
       remaining={remaining}
+      payments={data.payments.filter((payment) => payment.expenseId === expense.id)}
+      removePayment={deletePayment}
       edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
       remove={() => deleteExpense(expense)}
-      close={() => setExpandedExpenseId("")}
       save={(payment) => {
         setData((current) => ({ ...current, payments: [...current.payments, payment] }));
-        setExpandedExpenseId("");
         notify("Pago registrado");
       }}
     />;
+    const balanceLabel = (expense: Expense, remaining: number) => remaining > 0.005
+      ? <span className="balance">Falta {money(remaining, expense.currency)}</span>
+      : <span className="paid">✓ Pagado</span>;
 
     return <div className="page-content">
-      <SimpleHeading title="Costos de remodelación" action="Ingresar costo" onAction={() => setModal("expense")} />
-      {remodelBudget > 0 ? <section className={`cost-budget-comparison ${remodelDifference > 0.005 ? "over" : "under"}`}>
-        <div><span>Presupuesto proyectado de remodelación</span><strong>{money(remodelBudget, "USD")}</strong></div>
-        <div><span>Costos reales registrados</span><strong>{money(totals.committedUsd, "USD")}</strong></div>
-        {remodelDifference > 0.005 && <p>⚠ Gastaste <b>{money(remodelDifference, "USD")} más</b> que lo proyectado.</p>}
-      </section> : <section className="cost-budget-comparison unset"><p>Definí el presupuesto proyectado en Inversores para compararlo con los costos.</p><button className="text-button" onClick={() => setView("investors")}>Ir a Inversores →</button></section>}
-      <div className="expense-category-filters" aria-label="Filtrar costos por categoría">
+      <SimpleHeading title="Costos" action="Ingresar costo" onAction={() => setModal("expense")} />
+      {remodelBudget > 0 && <p className={`budget-line ${remodelDifference > 0.005 ? "over" : ""}`}>
+        Presupuesto proyectado <b>{money(remodelBudget, "USD")}</b> · Gastado <b>{money(totals.committedUsd, "USD")}</b>
+        {remodelDifference > 0.005 && <> · <b>{money(remodelDifference, "USD")} por encima</b></>}
+      </p>}
+      {data.expenses.length > 0 && <div className="expense-category-filters" aria-label="Filtrar costos">
         <button className={expenseCategoryFilter === "all" ? "active" : ""} onClick={() => setExpenseCategoryFilter("all")}>Todos <span>{data.expenses.length}</span></button>
+        {pendingCount > 0 && <button className={expenseCategoryFilter === "pending" ? "active" : ""} onClick={() => setExpenseCategoryFilter("pending")}>Falta pagar <span>{pendingCount}</span></button>}
         {categories.map((category) => {
           const count = data.expenses.filter((expense) => expense.categoryId === category.id).length;
           return count > 0 ? <button key={category.id} className={expenseCategoryFilter === category.id ? "active" : ""} onClick={() => setExpenseCategoryFilter(category.id)}>{category.name} <span>{count}</span></button> : null;
         })}
-      </div>
-      <button className="text-button category-manager-trigger" onClick={() => setView("categories")}>Administrar categorías</button>
-      {data.expenses.length === 0 ? <EmptyState icon="$" title="Todavía no hay costos" copy="Ingresá el primer costo para comenzar." action="Ingresar costo" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay costos en esta categoría.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
-        <><div className="expense-sheet-wrap expense-desktop-view">
+      </div>}
+      {data.expenses.length === 0 ? <EmptyState title="Todavía no hay costos" copy="Ingresá el primer costo para comenzar." action="Ingresar costo" onAction={() => setModal("expense")} /> : filteredExpenses.length === 0 ? <div className="filtered-empty"><b>No hay costos en este filtro.</b><button className="text-button" onClick={() => setExpenseCategoryFilter("all")}>Ver todos</button></div> : (
+        <><p className="list-hint">Tocá un costo para ver el detalle o registrar un pago.</p>
+        <div className="expense-sheet-wrap expense-desktop-view">
           <table className="expense-sheet">
-            <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th className="number-cell">Monto</th><th className="number-cell">Saldo</th><th className="number-cell">Pagado</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Concepto</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Falta pagar</th></tr></thead>
             <tbody>{filteredExpenses.map((expense) => {
               const paid = paymentForExpense(expense);
               const remaining = remainingForExpense(expense);
               const expanded = expandedExpenseId === expense.id;
-              const togglePayment = () => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id);
               return <Fragment key={expense.id}><tr
                 className={`expense-data-row ${expanded ? "expanded" : ""}`}
                 tabIndex={0}
                 aria-expanded={expanded}
-                onClick={togglePayment}
+                onClick={() => toggleExpense(expense)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    togglePayment();
+                    toggleExpense(expense);
                   }
                 }}
               >
                 <td className="date-cell">{shortDate(expense.date)}</td>
-                <td><b>{categoryName(expense.categoryId)}</b></td>
-                <td>{subcategoryName(expense.subcategoryId) || "—"}</td>
+                <td className="concept-cell"><b>{categoryName(expense.categoryId)}</b>{subcategoryName(expense.subcategoryId) && <span> · {subcategoryName(expense.subcategoryId)}</span>}{expense.description && <small>{expense.description}</small>}</td>
                 <td className="number-cell"><b>{money(expense.amount, expense.currency)}</b></td>
-                <td className="number-cell balance-cell">{money(remaining, expense.currency)}</td>
                 <td className="number-cell paid-cell">{money(paid, expense.currency)}</td>
+                <td className="number-cell balance-cell">{remaining > 0.005 ? money(remaining, expense.currency) : <span className="paid">✓ Pagado</span>}</td>
               </tr>
-              {expanded && <tr className="expense-payment-row"><td colSpan={6}>
+              {expanded && <tr className="expense-payment-row"><td colSpan={5}>
                 {expenseDetails(expense, remaining)}
               </td></tr>}
               </Fragment>;
@@ -617,78 +597,30 @@ export function ControlObraApp() {
           </table>
         </div>
         <div className="expense-mobile-list">{filteredExpenses.map((expense) => {
-          const paid = paymentForExpense(expense);
           const remaining = remainingForExpense(expense);
           const expanded = expandedExpenseId === expense.id;
           return <article className={`expense-mobile-card ${expanded ? "expanded" : ""}`} key={expense.id}>
-            <button type="button" className="expense-mobile-summary" aria-expanded={expanded} onClick={() => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id)}>
-              <div className="expense-mobile-title"><b>{categoryName(expense.categoryId)}{subcategoryName(expense.subcategoryId) ? ` · ${subcategoryName(expense.subcategoryId)}` : ""}</b><time>{shortDate(expense.date)}</time></div>
-              <div className="expense-mobile-numbers"><span>Monto <b>{money(expense.amount, expense.currency)}</b></span><span className="balance">Saldo <b>{money(remaining, expense.currency)}</b></span><span className="paid">Pagado <b>{money(paid, expense.currency)}</b></span></div>
+            <button type="button" className="expense-mobile-summary" aria-expanded={expanded} onClick={() => toggleExpense(expense)}>
+              <div className="expense-mobile-title"><b>{pathName(expense.categoryId, expense.subcategoryId)}</b><strong>{money(expense.amount, expense.currency)}</strong></div>
+              <div className="expense-mobile-meta"><time>{shortDate(expense.date)}</time>{balanceLabel(expense, remaining)}</div>
             </button>
             {expanded && <div className="expense-mobile-details">{expenseDetails(expense, remaining)}</div>}
           </article>;
         })}</div></>
       )}
-    </div>;
-  };
-
-  const renderPayments = () => {
-    const pending = data.expenses.filter((expense) => remainingForExpense(expense) > 0.005).slice().sort((a, b) => b.date.localeCompare(a.date));
-    const paymentDetails = (expense: Expense, remaining: number) => <InlinePaymentForm
-      expense={expense}
-      rate={rate}
-      remaining={remaining}
-      edit={() => { setSelectedExpenseId(expense.id); setModal("expense"); }}
-      remove={() => deleteExpense(expense)}
-      close={() => setExpandedExpenseId("")}
-      save={(payment) => {
-        setData((current) => ({ ...current, payments: [...current.payments, payment] }));
-        setExpandedExpenseId("");
-        notify("Pago registrado");
-      }}
-    />;
-    return <div className="page-content">
-      <SimpleHeading title="Pagos realizados" />
-      {pending.length === 0 ? <EmptyState icon="✓" title="No hay pagos pendientes" copy="Los costos pendientes aparecerán acá." /> : (
-        <section className="payment-sheet-section">
-          <div className="expense-sheet-wrap expense-desktop-view">
-            <table className="expense-sheet payment-sheet">
-              <thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th className="number-cell">Monto</th><th className="number-cell">Pagado</th><th className="number-cell">Saldo</th></tr></thead>
-              <tbody>{pending.map((expense) => {
-                const paid = paymentForExpense(expense);
-                const remaining = remainingForExpense(expense);
-                const expanded = expandedExpenseId === expense.id;
-                const togglePayment = () => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id);
-                return <Fragment key={expense.id}><tr className={`expense-data-row ${expanded ? "expanded" : ""}`} tabIndex={0} aria-expanded={expanded} onClick={togglePayment} onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); togglePayment(); }
-                }}>
-                  <td className="date-cell">{shortDate(expense.date)}</td><td><b>{categoryName(expense.categoryId)}</b></td><td>{subcategoryName(expense.subcategoryId) || "—"}</td><td className="number-cell"><b>{money(expense.amount, expense.currency)}</b></td><td className="number-cell paid-cell">{money(paid, expense.currency)}</td><td className="number-cell balance-cell">{money(remaining, expense.currency)}</td>
-                </tr>{expanded && <tr className="expense-payment-row"><td colSpan={6}>{paymentDetails(expense, remaining)}</td></tr>}</Fragment>;
-              })}</tbody>
-            </table>
-          </div>
-          <div className="expense-mobile-list">{pending.map((expense) => {
-            const paid = paymentForExpense(expense);
-            const remaining = remainingForExpense(expense);
-            const expanded = expandedExpenseId === expense.id;
-            return <article className={`expense-mobile-card ${expanded ? "expanded" : ""}`} key={expense.id}>
-              <button type="button" className="expense-mobile-summary" aria-expanded={expanded} onClick={() => setExpandedExpenseId((current) => current === expense.id ? "" : expense.id)}>
-                <div className="expense-mobile-title"><b>{categoryName(expense.categoryId)}{subcategoryName(expense.subcategoryId) ? ` · ${subcategoryName(expense.subcategoryId)}` : ""}</b><time>{shortDate(expense.date)}</time></div>
-                <div className="expense-mobile-numbers"><span>Monto <b>{money(expense.amount, expense.currency)}</b></span><span className="paid">Pagado <b>{money(paid, expense.currency)}</b></span><span className="balance">Saldo <b>{money(remaining, expense.currency)}</b></span></div>
-              </button>
-              {expanded && <div className="expense-mobile-details">{paymentDetails(expense, remaining)}</div>}
-            </article>;
-          })}</div>
-        </section>
-      )}
-      {data.payments.length > 0 && <section className="history-section">
-        <div className="expense-sheet-wrap payment-history-desktop"><table className="expense-sheet payment-history-sheet"><thead><tr><th>Fecha</th><th>Categoría</th><th>Subcategoría</th><th>Detalle</th><th className="number-cell">Monto pagado</th><th /></tr></thead><tbody>{data.payments.slice().reverse().map((payment) => {
+      <div className="expenses-footer">
+        <button className="text-button" onClick={() => setView("categories")}>Administrar categorías</button>
+        {data.payments.length > 0 && <button className="text-button" onClick={() => setShowPaymentHistory((visible) => !visible)}>{showPaymentHistory ? "Ocultar historial de pagos" : `Ver historial de pagos (${data.payments.length})`}</button>}
+      </div>
+      {showPaymentHistory && data.payments.length > 0 && <section className="history-section">
+        <h2>Historial de pagos</h2>
+        <div className="payment-history-list">{data.payments.slice().sort((a, b) => b.date.localeCompare(a.date)).map((payment) => {
           const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <tr key={payment.id}><td className="date-cell">{shortDate(payment.date)}</td><td><b>{expense ? categoryName(expense.categoryId) : "Costo"}</b></td><td>{expense ? subcategoryName(expense.subcategoryId) || "—" : "—"}</td><td>{payment.description || "Pago registrado"}</td><td className="number-cell paid-cell"><b>{money(payment.amount, payment.currency)}</b></td><td className="payment-delete-cell"><button className="danger-button compact" onClick={() => deletePayment(payment)}>Eliminar</button></td></tr>;
-        })}</tbody></table></div>
-        <div className="payment-history-mobile">{data.payments.slice().reverse().map((payment) => {
-          const expense = data.expenses.find((item) => item.id === payment.expenseId);
-          return <article key={payment.id}><div><b>{expense ? pathName(expense.categoryId, expense.subcategoryId) : "Costo"}</b><time>{shortDate(payment.date)}</time></div><span>{payment.description || "Pago registrado"}</span><strong>{money(payment.amount, payment.currency)}</strong><button className="danger-button compact" onClick={() => deletePayment(payment)}>Eliminar</button></article>;
+          return <article key={payment.id}>
+            <div><b>{expense ? pathName(expense.categoryId, expense.subcategoryId) : "Costo"}</b><small>{shortDate(payment.date)}{payment.description ? ` · ${payment.description}` : ""}</small></div>
+            <strong>{money(payment.amount, payment.currency)}</strong>
+            <button className="danger-button compact" onClick={() => deletePayment(payment)}>Eliminar</button>
+          </article>;
         })}</div>
       </section>}
     </div>;
@@ -710,8 +642,8 @@ export function ControlObraApp() {
 
   const renderBudgets = () => (
     <div className="page-content">
-      <PageHeading eyebrow="Comparaciones" title="Presupuestos" copy="Compará ofertas y elegí una." action="Nueva comparación" onAction={() => setModal("budget")} />
-      {data.budgetGroups.length === 0 ? <EmptyState icon="≡" title="No hay presupuestos cargados" copy="Creá una comparación y agregá uno o varios proveedores." action="Nueva comparación" onAction={() => setModal("budget")} /> : (
+      <SimpleHeading title="Presupuestos" action="Nueva comparación" onAction={() => setModal("budget")} />
+      {data.budgetGroups.length === 0 ? <EmptyState title="No hay presupuestos cargados" copy="Creá una comparación (por ejemplo “sanitarios del baño”) y agregá las ofertas de cada proveedor. Al aprobar una, pasa a Costos." action="Nueva comparación" onAction={() => setModal("budget")} /> : (
         <div className="budget-groups">{data.budgetGroups.map((group) => {
           const amounts = group.offers.map((offer) => toArs(offer.amount, offer.currency, offer.rate));
           const cheapest = amounts.length ? Math.min(...amounts) : 0;
@@ -765,8 +697,18 @@ export function ControlObraApp() {
       : null;
     const ownAnnualRate = ownTermDays && ownTermDays > 0 ? ownReturnPercent * (365 / ownTermDays) : null;
     const ownRateStatus = !effectiveOwnCapital ? "Sin aporte" : !plan.projectedSaleDate ? "Falta fecha de venta" : !plan.purchaseDate ? "Falta fecha de compra" : !ownTermDays || ownTermDays <= 0 ? "Revisar fechas" : "Calculada";
+    const propertyCommissionUsd = plan.propertyValueUsd * (plan.propertyCommissionPercent / 100);
+    const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent);
+    const remodelDifference = totals.committedUsd - plan.remodelBudgetUsd;
+    const editPlan = (field: "property" | "remodel" | "sale") => { setInvestmentField(field); setModal("investmentPlan"); };
     return <div className="page-content">
       <SimpleHeading title="Inversores" action="Nuevo inversor" onAction={() => { setSelectedInvestorId(""); setModal("investor"); }} />
+
+      <section className="funding-group"><span className="funding-group-label">Inversión y venta · tocá para editar</span><div className="investment-plan-grid">
+        <button type="button" className="plan-card" onClick={() => editPlan("property")}><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{plan.propertyValueUsd > 0 ? `Incluye ${money(propertyCommissionUsd, "USD")} de comisiones (${percent(plan.propertyCommissionPercent)})` : "Falta cargar el valor"}</small></button>
+        <button type="button" className={`plan-card ${plan.remodelBudgetUsd > 0 && remodelDifference > 0.005 ? "over" : ""}`} onClick={() => editPlan("remodel")}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd <= 0 ? "Falta cargar la proyección" : remodelDifference > 0.005 ? `${money(remodelDifference, "USD")} por encima` : "Dentro de lo proyectado"}</small></button>
+        <button type="button" className="plan-card" onClick={() => editPlan("sale")}><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Fecha estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></button>
+      </div></section>
 
       <section className="funding-group"><span className="funding-group-label">Capital propio</span><div className="funding-summary-grid own-funding-summary">
         <article><span>Capital propio calculado</span><strong>{money(effectiveOwnCapital, "USD")}</strong><small>{plan.ownCapitalManual ? `Estimado informado: ${money(plan.ownCapitalUsd, "USD")}` : "Calculado automáticamente"}</small></article>
@@ -811,7 +753,7 @@ export function ControlObraApp() {
             </tr>{expanded && <tr className="investor-actions-row"><td colSpan={7}><div className="investor-expanded-actions"><div className="contribution-edit-list">{contributions.map((contribution) => <button className="mini-button" type="button" key={contribution.id} onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(contribution.id); setModal("contribution"); }}>Editar aporte · {shortDate(contribution.date)} · {money(contribution.amount, contribution.currency ?? "USD")}</button>)}</div><div className="investor-actions"><button className="row-payment-button" onClick={() => { setSelectedInvestorId(investor.id); setSelectedContributionId(""); setModal("contribution"); }}>＋ Aporte</button><button className="mini-button" onClick={() => { setSelectedInvestorId(investor.id); setModal("investor"); }}>Editar inversor</button><button className="danger-button compact" onClick={() => deleteInvestor(investor)}>Eliminar inversor</button></div></div></td></tr>}</Fragment>;
           })}</tbody>
         </table>
-        <div className="annual-rate-help"><b>Tasa anual simple, no efectiva</b><span>Ganancia % × 365 ÷ días hasta la venta. No supone reinversión ni interés compuesto. Si hay varios aportes, usa una fecha promedio ponderada por cada monto convertido a USD.</span></div>
+        <div className="annual-rate-help">Tocá una fila para ver opciones. Tasa anual simple: ganancia % × 365 ÷ días hasta la venta (sin reinversión).</div>
       </div>
       <div className="investor-mobile-list">
         <article className={`investor-mobile-card own-capital-card ${expandedInvestorId === "own-capital" ? "expanded" : ""}`}>
@@ -848,7 +790,8 @@ export function ControlObraApp() {
 
   const renderCategories = () => (
     <div className="page-content">
-      <SimpleHeading title="Categorías y subcategorías" />
+      <button className="text-button back-link" onClick={() => setView("expenses")}>← Volver a Costos</button>
+      <SimpleHeading title="Categorías" />
       <section className="manage-card category-catalog">
         <div className="manage-head"><h2>Categorías de costos</h2><button className="secondary-button" onClick={() => addNamedItem("category")}>＋ Agregar categoría</button></div>
         {categories.map((category) => {
@@ -916,37 +859,38 @@ export function ControlObraApp() {
     notify(`${isCategory ? "Categoría" : "Subcategoría"} eliminada`);
   };
 
-  if (!loaded) return <div className="app-loading"><div className="loading-mark">CO</div><h1>Control de Obra</h1><p>Preparando tus datos…</p></div>;
+  if (!loaded) return <div className="app-loading"><h1>Control de Obra</h1><p>Preparando tus datos…</p></div>;
+
+  const activeNav = view === "categories" ? "expenses" : view;
+  const saveLabel = saveStatus === "saved" ? "Todo guardado" : saveStatus === "saving" ? "Guardando…" : "Sin conexión, se reintentará";
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">CO</div><div><b>Control de Obra</b><small>Gestión simple</small></div></div>
-        <nav>{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span>{item.label}</button>)}</nav>
-        <div className="sidebar-foot"><div className={`sync-dot ${saveStatus}`} /><div><b>{saveStatus === "saved" ? "Todo guardado" : saveStatus === "saving" ? "Guardando…" : "Sin conexión"}</b><small>{saveStatus === "offline" ? "Se reintentará automáticamente" : "Datos protegidos"}</small></div></div>
+        <div className="brand"><b>Control de Obra</b></div>
+        <nav>{nav.map((item) => <button key={item.id} className={activeNav === item.id ? "active" : ""} onClick={() => setView(item.id)}><NavIcon name={item.icon} />{item.label}</button>)}</nav>
+        <div className="sidebar-foot"><div className={`sync-dot ${saveStatus}`} /><span>{saveLabel}</span></div>
       </aside>
 
       <section className="main-area">
         <header className="topbar">
-          <div className="mobile-brand"><div className="brand-mark">CO</div><b>Control de Obra</b></div>
-          <div className="project-chip"><span>Obra actual</span><b>Casa principal</b></div>
-          <button className="rate-chip" onClick={() => setModal("rate")}><span>Dólar oficial</span><b>{money(rate, "ARS")}</b><small>{shortDate(rateDate)} · editar</small></button>
+          <div className="mobile-brand"><b>Control de Obra</b><div className={`sync-dot ${saveStatus}`} title={saveLabel} /></div>
+          <button className="rate-chip" onClick={() => setModal("rate")} title={`Cotización del ${shortDate(rateDate)} · tocá para editar`}><span>Dólar oficial</span><b>{money(rate, "ARS")}</b></button>
         </header>
         {view === "home" && renderHome()}
         {view === "expenses" && renderExpenses()}
-        {view === "payments" && renderPayments()}
         {view === "budgets" && renderBudgets()}
         {view === "investors" && renderInvestors()}
         {view === "categories" && renderCategories()}
       </section>
 
-      <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>
+      <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={activeNav === item.id ? "active" : ""} onClick={() => setView(item.id)}><NavIcon name={item.icon} /><small>{item.label}</small></button>)}</nav>
 
       {modal === "expense" && <ExpenseModal data={data} rate={rate} expense={data.expenses.find((item) => item.id === selectedExpenseId)} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(expense) => {
         setData((current) => ({ ...current, expenses: current.expenses.some((item) => item.id === expense.id) ? current.expenses.map((item) => item.id === expense.id ? expense : item) : [...current.expenses, expense] }));
         setModal(null); setSelectedExpenseId(""); notify("Costo guardado");
       }} />}
-      {modal === "payment" && <PaymentModal data={data} rate={rate} initialExpenseId={selectedExpenseId} remainingForExpense={remainingForExpense} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedExpenseId(""); notify("Pago registrado"); }} />}
+      {modal === "payment" && <PaymentModal data={data} rate={rate} initialExpenseId={selectedExpenseId} remainingForExpense={remainingForExpense} pathName={pathName} close={() => { setModal(null); setSelectedExpenseId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedExpenseId(""); notify("Pago registrado"); }} />}
       {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} addSubcategoryForCategory={addSubcategoryForCategory} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} history={data.exchangeRateHistory ?? []} close={() => setModal(null)} save={(nextRate, nextDate) => { const nextSource = "Cotización ajustada manualmente"; setRate(nextRate); setRateDate(nextDate); setRateSource(nextSource); setData((current) => ({ ...current, exchangeRateHistory: updateRateHistory(current.exchangeRateHistory ?? [], { date: nextDate, rate: nextRate, source: nextSource }) })); setModal(null); notify("Cotización actualizada"); }} />}
@@ -972,16 +916,16 @@ function SimpleHeading({ title, action, onAction }: { title: string; action?: st
   return <header className="simple-heading"><h1>{title}</h1>{action && <button className="primary-button large" onClick={onAction}>＋ {action}</button>}</header>;
 }
 
-function EmptyState({ icon, title, copy, action, onAction }: { icon: string; title: string; copy: string; action?: string; onAction?: () => void }) {
-  return <div className="empty-state"><span>{icon}</span><h2>{title}</h2><p>{copy}</p>{action && <button className="primary-button" onClick={onAction}>＋ {action}</button>}</div>;
+function EmptyState({ icon, title, copy, action, onAction }: { icon?: string; title: string; copy: string; action?: string; onAction?: () => void }) {
+  return <div className="empty-state">{icon && <span>{icon}</span>}<h2>{title}</h2><p>{copy}</p>{action && <button className="primary-button" onClick={onAction}>＋ {action}</button>}</div>;
 }
 
 function KindBadge({ kind }: { kind: ExpenseKind }) {
   return <span className={`kind-badge ${kind}`}>{kind === "approved" ? "Presupuesto aprobado" : kind === "additional" ? "Costo adicional" : "Costo"}</span>;
 }
 
-function CategorySelect({ label, value, setValue, items, onNew }: { label: string; value: string; setValue: (value: string) => void; items: Category[]; onNew: () => string }) {
-  return <label><span>{label}</span><select required value={value} onChange={(event) => { if (event.target.value === "__new") { const id = onNew(); if (id) setValue(id); } else setValue(event.target.value); }}><option value="">Elegir…</option>{items.filter((item) => !item.archived).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}<option value="__new">＋ Crear nueva</option></select></label>;
+function CategorySelect({ label, value, setValue, items, onNew, className }: { label: string; value: string; setValue: (value: string) => void; items: Category[]; onNew: () => string; className?: string }) {
+  return <label className={className}><span>{label}</span><select required value={value} onChange={(event) => { if (event.target.value === "__new") { const id = onNew(); if (id) setValue(id); } else setValue(event.target.value); }}><option value="">Elegir…</option>{items.filter((item) => !item.archived).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}<option value="__new">＋ Crear nueva</option></select></label>;
 }
 
 function SubcategorySelect({ categoryId, value, setValue, categories, subcategories, onNew }: { categoryId: string; value: string; setValue: (value: string) => void; categories: Category[]; subcategories: Subcategory[]; onNew: () => string }) {
@@ -994,33 +938,52 @@ function SubcategorySelect({ categoryId, value, setValue, categories, subcategor
   </select></label>;
 }
 
+function AmountField({ label, currency, setCurrency, amount, setAmount, invalid = false, className = "span-2" }: { label: string; currency: Currency; setCurrency: (value: Currency) => void; amount: string; setAmount: (value: string) => void; invalid?: boolean; className?: string }) {
+  return <div className={`amount-field ${className}`}><span>{label}</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`${label} en ${currency}`} required invalid={invalid} value={amount} setValue={setAmount} placeholder="0" /></label></div></div>;
+}
+
+function ConversionHint({ amount, currency, rate }: { amount: string; currency: Currency; rate: number }) {
+  if (!amount || Number(amount) <= 0) return null;
+  return <p className="conversion-hint span-2">≈ {currency === "ARS" ? money(Number(amount) / rate, "USD") : money(Number(amount) * rate, "ARS")} (dólar {money(rate, "ARS")})</p>;
+}
+
+function MoreOptions({ open, setOpen, summary, children }: { open: boolean; setOpen: (value: boolean) => void; summary: string; children: ReactNode }) {
+  if (open) return <>{children}</>;
+  return <button type="button" className="more-options span-2" onClick={() => setOpen(true)}><span>＋ Más opciones</span><small>{summary}</small></button>;
+}
+
 function ExpenseModal({ data, rate, expense, addNamedItem, addSubcategoryForCategory, close, save }: { data: AppState; rate: number; expense?: Expense; addNamedItem: (kind: "category" | "subcategory") => string; addSubcategoryForCategory: (categoryId: string) => string; close: () => void; save: (expense: Expense) => void }) {
+  const lastCurrency = data.expenses[data.expenses.length - 1]?.currency ?? "ARS";
   const [date, setDate] = useState(expense?.date ?? today());
   const [description, setDescription] = useState(expense?.description ?? "");
   const [categoryId, setCategoryId] = useState(expense?.categoryId ?? "");
   const [subcategoryId, setSubcategoryId] = useState(expense?.subcategoryId ?? "");
   const [responsible, setResponsible] = useState(expense?.responsible ?? "");
   const [amount, setAmount] = useState(expense?.amount?.toString() ?? "");
-  const [currency, setCurrency] = useState<Currency>(expense?.currency ?? "USD");
+  const [currency, setCurrency] = useState<Currency>(expense?.currency ?? lastCurrency);
+  const [showMore, setShowMore] = useState(Boolean(expense));
   const selectedRate = expense?.rate ?? rate;
+  const hasSubcategories = categoryId ? linkedSubcategories(categoryId, data.categories, data.subcategories).length > 0 : false;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (Number(amount) <= 0) return;
     save({ id: expense?.id ?? uid("exp"), date, description: description.trim(), categoryId, subcategoryId, responsible: responsible.trim(), amount: Number(amount), currency, rate: selectedRate, kind: expense?.kind ?? "manual", budgetGroupId: expense?.budgetGroupId });
   };
-  return <Modal title={expense ? "Editar costo" : "Ingresar costo"} close={close} wide><form className="form-grid" onSubmit={submit}>
-    <CategorySelect label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={data.categories} onNew={() => addNamedItem("category")} />
-    <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={data.categories} subcategories={data.subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />
-    <label className="span-2"><span>Descripción del costo (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
-    <label><span>Fecha</span><DateInput required value={date} setValue={setDate} /></label>
-    <label><span>Responsable (opcional)</span><input value={responsible} onChange={(event) => setResponsible(event.target.value)} placeholder="Arquitecto, albañil…" /></label>
-    <div className="amount-field span-2"><span>Monto</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`Monto en ${currency}`} required value={amount} setValue={setAmount} placeholder={currency} /></label></div></div>
-    {amount && <div className="conversion-note span-2">Equivale a <b>{currency === "ARS" ? money(Number(amount) / selectedRate, "USD") : money(Number(amount) * selectedRate, "ARS")}</b> usando dólar {money(selectedRate, "ARS")}.</div>}
+  return <Modal title={expense ? "Editar costo" : "Ingresar costo"} close={close}><form className="form-grid" onSubmit={submit}>
+    <AmountField label="Monto" currency={currency} setCurrency={setCurrency} amount={amount} setAmount={setAmount} />
+    <ConversionHint amount={amount} currency={currency} rate={selectedRate} />
+    <CategorySelect className={hasSubcategories ? undefined : "span-2"} label="Categoría" value={categoryId} setValue={(value) => { setCategoryId(value); setSubcategoryId(""); }} items={data.categories} onNew={() => addNamedItem("category")} />
+    {hasSubcategories && <SubcategorySelect categoryId={categoryId} value={subcategoryId} setValue={setSubcategoryId} categories={data.categories} subcategories={data.subcategories} onNew={() => addSubcategoryForCategory(categoryId)} />}
+    <label className="span-2"><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: compra de grifería" /></label>
+    <MoreOptions open={showMore} setOpen={setShowMore} summary={`Fecha: ${date === today() ? "hoy" : shortDate(date)} · Responsable`}>
+      <label><span>Fecha</span><DateInput required value={date} setValue={setDate} /></label>
+      <label><span>Responsable (opcional)</span><input value={responsible} onChange={(event) => setResponsible(event.target.value)} placeholder="Arquitecto, albañil…" /></label>
+    </MoreOptions>
     <FormActions close={close} label={expense ? "Guardar cambios" : "Guardar costo"} />
   </form></Modal>;
 }
 
-function InlinePaymentForm({ expense, rate, remaining, edit, remove, close, save }: { expense: Expense; rate: number; remaining: number; edit: () => void; remove: () => void; close: () => void; save: (payment: Payment) => void }) {
+function InlinePaymentForm({ expense, rate, remaining, payments, removePayment, edit, remove, save }: { expense: Expense; rate: number; remaining: number; payments: Payment[]; removePayment: (payment: Payment) => void; edit?: () => void; remove?: () => void; save: (payment: Payment) => void }) {
   const [partial, setPartial] = useState(false);
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
@@ -1036,51 +999,56 @@ function InlinePaymentForm({ expense, rate, remaining, edit, remove, close, save
     : expense.currency === "ARS"
       ? Number(amount) * rate
       : Number(amount) / rate;
+  const tooMuch = Number(amount) > maxAmount + 0.005;
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!amount || Number(amount) <= 0 || Number(amount) > maxAmount + 0.005) return;
+    if (!amount || Number(amount) <= 0 || tooMuch) return;
     save({ id: uid("pay"), expenseId: expense.id, date, description: description.trim(), amount: Number(amount), currency, rate });
+    setPartial(false);
+    setAmount("");
+    setDescription("");
   };
   const payFull = () => save({ id: uid("pay"), expenseId: expense.id, date: today(), description: "", amount: remaining, currency: expense.currency, rate });
+  const details = [
+    expense.description && ["Descripción", expense.description],
+    expense.responsible && ["Responsable", expense.responsible],
+    ["Equivale a", expense.currency === "ARS" ? money(expense.amount / expense.rate, "USD") : money(expense.amount * expense.rate, "ARS")],
+  ].filter(Boolean) as string[][];
 
   return <div className="inline-payment-panel">
-    <div className="expense-detail-head">
-      <div className="expense-detail-grid"><div><span>Descripción</span><b>{expense.description || "Sin descripción"}</b></div><div><span>Responsable</span><b>{expense.responsible || "Sin responsable"}</b></div></div>
-      <small className="expense-conversion">Equivale a {expense.currency === "ARS" ? money(expense.amount / expense.rate, "USD") : money(expense.amount * expense.rate, "ARS")}</small>
-      <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar costo</button><button type="button" className="danger-button compact" onClick={remove}>Eliminar costo</button><button type="button" className="icon-button" onClick={close} aria-label="Cerrar detalles">×</button></div>
-    </div>
-    {remaining <= 0.005 ? <div className="inline-payment-complete"><span>✓</span><div><b>Este costo ya está pagado.</b><small>No tiene saldo pendiente.</small></div></div> : !partial ? <div className="full-payment-choice"><div><span>Saldo pendiente</span><b>{money(remaining, expense.currency)}</b></div><button type="button" className="primary-button" onClick={payFull}>Registrar pago total</button><button type="button" className="text-button" onClick={() => setPartial(true)}>Registrar pago parcial</button></div> : <form className="inline-payment-form" onSubmit={submit}>
+    {edit && remove && <div className="expense-detail-head">
+      <dl className="expense-detail-grid">{details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <div className="expense-detail-actions"><button type="button" className="mini-button" onClick={edit}>Editar</button><button type="button" className="danger-button compact" onClick={remove}>Eliminar</button></div>
+    </div>}
+    {payments.length > 0 && <div className="expense-payments">
+      <span>Pagos de este costo</span>
+      {payments.slice().sort((a, b) => a.date.localeCompare(b.date)).map((payment) => <div key={payment.id}>
+        <small>{shortDate(payment.date)}{payment.description ? ` · ${payment.description}` : ""}</small>
+        <b>{money(payment.amount, payment.currency)}</b>
+        <button type="button" className="link-danger" onClick={() => removePayment(payment)}>Eliminar</button>
+      </div>)}
+    </div>}
+    {remaining <= 0.005 ? <div className="inline-payment-complete">✓ Este costo ya está pagado.</div> : !partial ? <div className="full-payment-choice">
+      <div><span>Falta pagar</span><b>{money(remaining, expense.currency)}</b></div>
+      <button type="button" className="secondary-button" onClick={() => setPartial(true)}>Pagar una parte</button>
+      <button type="button" className="primary-button" onClick={payFull}>Pagar todo</button>
+    </div> : <form className="form-grid inline-payment-form" onSubmit={submit}>
+      <AmountField label="Monto pagado" currency={currency} setCurrency={(value) => { setCurrency(value); setAmount(""); }} amount={amount} setAmount={setAmount} invalid={tooMuch} />
+      {amount && Number(amount) > 0 && <p className={`conversion-hint span-2 ${tooMuch ? "error" : ""}`}>{tooMuch ? <>Supera lo que falta pagar. Máximo: <b>{money(maxAmount, currency)}</b></> : <>Se descuentan {money(debitAmount, expense.currency)} del saldo.</>}</p>}
       <label><span>Fecha del pago</span><DateInput required value={date} setValue={setDate} /></label>
-      <div className="amount-field"><span>Monto pagado</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={(value) => { setCurrency(value); setAmount(""); }} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`Monto pagado en ${currency}`} required invalid={Number(amount) > maxAmount + 0.005} value={amount} setValue={setAmount} placeholder={currency} /></label></div></div>
-      <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
-      <button className="primary-button inline-payment-submit" type="submit">Guardar pago parcial</button>
-      {amount && Number(amount) > 0 && <div className={`inline-payment-note ${Number(amount) > maxAmount + 0.005 ? "error" : ""}`}>{Number(amount) > maxAmount + 0.005 ? <>El monto supera el saldo. El máximo es <b>{money(maxAmount, currency)}</b>.</> : <>Se descontarán <b>{money(debitAmount, expense.currency)}</b> del saldo.</>}</div>}
-      <button className="text-button inline-payment-back" type="button" onClick={() => setPartial(false)}>Volver a pago total</button>
+      <label><span>Nota (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia" /></label>
+      <div className="form-actions span-2"><button type="button" className="secondary-button" onClick={() => setPartial(false)}>Cancelar</button><button className="primary-button" type="submit">Guardar pago</button></div>
     </form>}
   </div>;
 }
 
-function PaymentModal({ data, rate, initialExpenseId, remainingForExpense, close, save }: { data: AppState; rate: number; initialExpenseId: string; remainingForExpense: (expense: Expense) => number; close: () => void; save: (payment: Payment) => void }) {
+function PaymentModal({ data, rate, initialExpenseId, remainingForExpense, pathName, close, save }: { data: AppState; rate: number; initialExpenseId: string; remainingForExpense: (expense: Expense) => number; pathName: (categoryId: string, subcategoryId: string) => string; close: () => void; save: (payment: Payment) => void }) {
   const [expenseId, setExpenseId] = useState(initialExpenseId);
-  const [partial, setPartial] = useState(false);
-  const [date, setDate] = useState(today());
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState<Currency>(data.expenses.find((item) => item.id === initialExpenseId)?.currency ?? "ARS");
   const expense = data.expenses.find((item) => item.id === expenseId);
-  const submit = (event: FormEvent) => { event.preventDefault(); if (Number(amount) <= 0) return; save({ id: uid("pay"), expenseId, date, description: description.trim(), amount: Number(amount), currency, rate }); };
-  const selectExpense = (value: string) => { const next = data.expenses.find((item) => item.id === value); setExpenseId(value); setCurrency(next?.currency ?? "ARS"); setAmount(""); setPartial(false); };
-  const payFull = () => { if (!expense) return; save({ id: uid("pay"), expenseId: expense.id, date: today(), description: "", amount: remainingForExpense(expense), currency: expense.currency, rate }); };
-  return <Modal title="Registrar pago" close={close}><form className="form-grid" onSubmit={submit}>
-    <label className="span-2"><span>Costo a pagar</span><select required value={expenseId} onChange={(event) => selectExpense(event.target.value)}><option value="">Elegir costo…</option>{data.expenses.filter((item) => remainingForExpense(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{item.description || data.categories.find((category) => category.id === item.categoryId)?.name || "Costo"} · resta {money(remainingForExpense(item), item.currency)}</option>)}</select></label>
-    {expense && !partial && <div className="full-payment-choice span-2"><div><span>Saldo pendiente</span><b>{money(remainingForExpense(expense), expense.currency)}</b></div><button type="button" className="primary-button" onClick={payFull}>Registrar pago total</button><button type="button" className="text-button" onClick={() => setPartial(true)}>Registrar pago parcial</button></div>}
-    {expense && partial && <><label><span>Fecha del pago</span><DateInput required value={date} setValue={setDate} /></label>
-      <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: transferencia parcial" /></label>
-      <label><span>Monto pagado</span><FormattedAmountInput required value={amount} setValue={setAmount} /></label>
-      <div className="field"><span>Moneda del pago</span><CurrencyFields currency={currency} setCurrency={setCurrency} /></div>
-      {amount && <div className="conversion-note span-2">Se descontarán <b>{expense.currency === currency ? money(Number(amount), expense.currency) : expense.currency === "ARS" ? money(Number(amount) * rate, "ARS") : money(Number(amount) / rate, "USD")}</b> del saldo, con la cotización de hoy.</div>}
-      <div className="form-actions span-2"><button type="button" className="secondary-button" onClick={() => setPartial(false)}>Volver</button><button className="primary-button" type="submit">Guardar pago parcial</button></div></>}
-  </form></Modal>;
+  return <Modal title="Registrar pago" close={close}><div className="form-grid">
+    <label className="span-2"><span>¿Qué costo pagaste?</span><select required value={expenseId} onChange={(event) => setExpenseId(event.target.value)}><option value="">Elegir costo…</option>{data.expenses.filter((item) => remainingForExpense(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{item.description || pathName(item.categoryId, item.subcategoryId)} · falta {money(remainingForExpense(item), item.currency)}</option>)}</select></label>
+    {expense && <div className="span-2"><InlinePaymentForm key={expense.id} expense={expense} rate={rate} remaining={remainingForExpense(expense)} payments={[]} removePayment={() => undefined} save={save} /></div>}
+  </div></Modal>;
 }
 
 function ProgressModal({ categories, subcategories, addSubcategoryForCategory, close, save }: { categories: Category[]; subcategories: Subcategory[]; addSubcategoryForCategory: (categoryId: string) => string; close: () => void; save: (item: ProgressItem) => void }) {
@@ -1105,14 +1073,16 @@ function BudgetModal({ categories, subcategories, addNamedItem, addSubcategoryFo
 
 function OfferModal({ rate, group, close, save }: { rate: number; group?: BudgetGroup; close: () => void; save: (offer: BudgetOffer) => void }) {
   const [supplier, setSupplier] = useState(""); const [date, setDate] = useState(today()); const [description, setDescription] = useState(""); const [amount, setAmount] = useState(""); const [currency, setCurrency] = useState<Currency>("ARS");
+  const [showMore, setShowMore] = useState(false);
   if (!group) return null;
   return <Modal title={`Agregar oferta · ${group.name}`} close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (Number(amount) <= 0) return; save({ id: uid("offer"), supplier: supplier.trim(), date, description: description.trim(), amount: Number(amount), currency, rate }); }}>
     <label className="span-2"><span>Proveedor o empresa</span><input required value={supplier} onChange={(event) => setSupplier(event.target.value)} placeholder="Nombre del proveedor" /></label>
-    <label><span>Fecha</span><DateInput required value={date} setValue={setDate} /></label>
-    <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Detalle breve" /></label>
-    <label><span>Monto total</span><FormattedAmountInput required value={amount} setValue={setAmount} /></label>
-    <div className="field"><span>Moneda</span><CurrencyFields currency={currency} setCurrency={setCurrency} /></div>
-    {amount && <div className="conversion-note span-2">Equivale a <b>{currency === "ARS" ? money(Number(amount) / rate, "USD") : money(Number(amount) * rate, "ARS")}</b>.</div>}
+    <AmountField label="Monto total" currency={currency} setCurrency={setCurrency} amount={amount} setAmount={setAmount} />
+    <ConversionHint amount={amount} currency={currency} rate={rate} />
+    <MoreOptions open={showMore} setOpen={setShowMore} summary={`Fecha: ${date === today() ? "hoy" : shortDate(date)} · Descripción`}>
+      <label><span>Fecha</span><DateInput required value={date} setValue={setDate} /></label>
+      <label><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Detalle breve" /></label>
+    </MoreOptions>
     <FormActions close={close} label="Guardar oferta" />
   </form></Modal>;
 }
@@ -1142,7 +1112,6 @@ function InvestmentPlanModal({ field, plan, investorCapitalUsd, close, save }: {
     {ownCapitalManual && <div className="source-note span-2"><span>Solo referencia</span><b>Los cálculos de ganancia y rendimiento seguirán usando el capital propio calculado automáticamente.</b></div>}
     {field === "remodel" && <label className="span-2"><span>Presupuesto proyectado de remodelación (USD)</span><FormattedAmountInput value={remodelBudget} setValue={setRemodelBudget} placeholder="USD" /></label>}
     {field === "sale" && <><label><span>Precio proyectado de venta (USD)</span><FormattedAmountInput value={salePrice} setValue={setSalePrice} placeholder="USD" /></label><label><span>Fecha proyectada de venta</span><DateInput value={saleDate} setValue={setSaleDate} /></label></>}
-    <div className="source-note span-2"><span>Dato automático</span><b>Los costos reales se calculan desde la pantalla Costos.</b></div>
     <FormActions close={close} label="Guardar valores" />
   </form></Modal>;
 }
@@ -1172,11 +1141,9 @@ function InvestorModal({ investor, rate, close, save }: { investor?: Investor; r
   };
   return <Modal title={investor ? "Editar inversor" : "Nuevo inversor"} close={close}><form className="form-grid" onSubmit={submit}>
     <label className="span-2"><span>Nombre del inversor</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Nombre y apellido" /></label>
-    {!investor && <><label className="span-2"><span>Fecha del primer aporte</span><DateInput required value={firstDate} setValue={setFirstDate} /></label><div className="amount-field span-2"><span>Primer aporte</span><div className="amount-control"><CurrencyFields currency={firstCurrency} setCurrency={setFirstCurrency} /><label className="amount-input"><span>{firstCurrency === "USD" ? "US$" : "$"}</span><FormattedAmountInput required value={firstAmount} setValue={setFirstAmount} placeholder={firstCurrency} /></label></div></div></>}
-    <div className="amount-field span-2"><span>Ganancia acordada para el inversor</span><div className="amount-control"><CurrencyFields currency={profitCurrency} setCurrency={setProfitCurrency} /><label className="amount-input"><span>{profitCurrency === "USD" ? "US$" : "$"}</span><FormattedAmountInput required value={profit} setValue={setProfit} placeholder={profitCurrency} /></label></div></div>
-    {profitCurrency === "ARS" && profit && <div className="conversion-note span-2">Equivale a <b>{money(Number(profit) / profitConversionRate, "USD")}</b> para los cálculos de inversión.</div>}
-    <div className="conversion-note span-2">La devolución total será el <b>capital recibido más esta ganancia</b>.</div>
-    {investor && <div className="source-note span-2"><span>Aportes</span><b>Las fechas y los montos se editan directamente desde la grilla de inversores.</b></div>}
+    {!investor && <><AmountField label="Primer aporte" currency={firstCurrency} setCurrency={setFirstCurrency} amount={firstAmount} setAmount={setFirstAmount} /><label className="span-2"><span>Fecha del primer aporte</span><DateInput required value={firstDate} setValue={setFirstDate} /></label></>}
+    <AmountField label="Ganancia acordada" currency={profitCurrency} setCurrency={setProfitCurrency} amount={profit} setAmount={setProfit} />
+    <p className="conversion-hint span-2">Se le devuelve lo que aportó más esta ganancia.{profitCurrency === "ARS" && profit ? ` Equivale a ${money(Number(profit) / profitConversionRate, "USD")}.` : ""}</p>
     <FormActions close={close} label={investor ? "Guardar cambios" : "Guardar inversor"} />
   </form></Modal>;
 }
@@ -1191,9 +1158,9 @@ function ContributionModal({ investor, contribution, rate, remove, close, save }
     if (Number(amount) <= 0) return;
     save({ id: contribution?.id ?? uid("contribution"), date, amount: Number(amount), currency, rate: contribution?.currency === currency ? contribution.rate ?? rate : rate });
   }}>
+    <AmountField label="Monto recibido" currency={currency} setCurrency={setCurrency} amount={amount} setAmount={setAmount} />
+    {currency === "ARS" && <ConversionHint amount={amount} currency={currency} rate={contribution?.currency === currency ? contribution.rate ?? rate : rate} />}
     <label className="span-2"><span>Fecha en que entregó el dinero</span><DateInput required value={date} setValue={setDate} /></label>
-    <div className="amount-field span-2"><span>Monto recibido</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput required value={amount} setValue={setAmount} placeholder={currency} /></label></div></div>
-    {currency === "ARS" && amount && <div className="conversion-note span-2">Equivale a <b>{money(Number(amount) / (contribution?.currency === currency ? contribution.rate ?? rate : rate), "USD")}</b> para los cálculos de inversión.</div>}
     <FormActions close={close} label="Guardar aporte" deleteLabel={contribution ? "Eliminar aporte" : undefined} onDelete={remove} />
   </form></Modal>;
 }
@@ -1202,7 +1169,7 @@ function RateModal({ rate, date, source, history, close, save }: { rate: number;
   const [nextRate, setNextRate] = useState(rate.toString()); const [nextDate, setNextDate] = useState(date);
   const [showAllHistory, setShowAllHistory] = useState(false);
   return <Modal title="Cotización del dólar" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (Number(nextRate) < 1) return; save(Number(nextRate), nextDate); }}>
-    <div className="source-note span-2"><span>Fuente actual</span><b>{source}</b><small>Se usa el promedio diario entre compra y venta del dólar oficial.</small></div>
+    <p className="conversion-hint span-2">Fuente: {source}. Se usa el promedio diario entre compra y venta.</p>
     <label><span>Pesos por dólar</span><FormattedAmountInput required value={nextRate} setValue={setNextRate} /></label>
     <label><span>Fecha de cotización</span><DateInput required value={nextDate} setValue={setNextDate} /></label>
     {history.length > 0 && <div className="rate-history span-2"><span>Historial de cotizaciones · {history.length} períodos</span>{history.slice(0, showAllHistory ? undefined : 8).map((item) => <div key={item.date}><time>{shortDate(item.date)}</time><b>{money(item.rate, "ARS")}</b></div>)}{history.length > 8 && <button className="text-button" type="button" onClick={() => setShowAllHistory((visible) => !visible)}>{showAllHistory ? "Ver menos" : "Ver todo el año"}</button>}</div>}
