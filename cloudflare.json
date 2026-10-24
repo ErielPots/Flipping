@@ -1,5 +1,6 @@
 {
   "workerName": "control-de-obra",
+  "accountId": "",
   "d1": {
     "databaseName": "control-de-obra-db",
     "databaseId": "5a8e69f5-95c0-4790-936f-031b887b1d07"

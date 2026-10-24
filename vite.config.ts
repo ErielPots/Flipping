@@ -17,6 +17,9 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 // local no mira el id) pero no para desplegar.
 const localBindingConfig = {
   name: deployConfig.workerName,
+  // Sin esto wrangler tiene que preguntar qué cuenta usar, y dentro de
+  // `npm run deploy` no hay terminal interactiva donde preguntarlo.
+  ...(deployConfig.accountId ? { account_id: deployConfig.accountId } : {}),
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
   assets: { binding: "ASSETS" },
