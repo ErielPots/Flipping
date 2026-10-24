@@ -14,7 +14,7 @@ const INITIAL_STATE = {
     { id: "cat-zinguero", name: "Zinguero", archived: false, subcategoryIds: [] },
     { id: "cat-muebles-cocina", name: "Muebles de cocina", archived: false, subcategoryIds: [] },
     { id: "cat-placares", name: "Placares", archived: false, subcategoryIds: [] },
-    { id: "cat-ventanas", name: "Ventanas", archived: false, subcategoryIds: [] },
+    { id: "cat-ventanas", name: "Aberturas", archived: false, subcategoryIds: [] },
   ],
   subcategories: [
     { id: "sub-mano-obra", name: "Mano de obra", archived: false },

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, Fragment, ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { ActionPreview, AssistantAction, AssistantChat } from "./AssistantChat";
 
 type Currency = "ARS" | "USD";
 type Category = { id: string; name: string; archived: boolean; subcategoryIds?: string[] };
@@ -123,7 +124,7 @@ const defaultCategories: Category[] = [
   { id: "cat-zinguero", name: "Zinguero", archived: false, subcategoryIds: [] },
   { id: "cat-muebles-cocina", name: "Muebles de cocina", archived: false, subcategoryIds: [] },
   { id: "cat-placares", name: "Placares", archived: false, subcategoryIds: [] },
-  { id: "cat-ventanas", name: "Ventanas", archived: false, subcategoryIds: [] },
+  { id: "cat-ventanas", name: "Aberturas", archived: false, subcategoryIds: [] },
 ];
 const defaultCategoryIds = new Set(defaultCategories.map((item) => item.id));
 const defaultSubcategoryIds = new Set(defaultSubcategories.map((item) => item.id));
@@ -178,7 +179,9 @@ function normalizeState(candidate: AppState | undefined): AppState {
       ? candidate.exchangeRateHistory.filter((item) => item?.date && Number.isFinite(item?.rate))
       : [],
   };
-  if ((candidate.catalogVersion ?? 0) >= 2) return { ...candidate, ...investmentState };
+  // "Ventanas" pasó a llamarse "Aberturas" (solo si no se le había puesto otro nombre a mano).
+  const renamedCategories = candidate.categories.map((item) => item.id === "cat-ventanas" && item.name === "Ventanas" ? { ...item, name: "Aberturas" } : item);
+  if ((candidate.catalogVersion ?? 0) >= 2) return { ...candidate, categories: renamedCategories, ...investmentState };
 
   const referencedCategories = new Set([
     ...candidate.expenses.map((item) => item.categoryId),
@@ -210,7 +213,10 @@ function normalizeState(candidate: AppState | undefined): AppState {
   };
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Fecha local (no UTC), así a la noche en Argentina no salta al día siguiente.
+const localDate = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+const today = () => localDate(new Date());
+const yesterday = () => { const date = new Date(); date.setDate(date.getDate() - 1); return localDate(date); };
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const money = (value: number, currency: Currency) =>
   new Intl.NumberFormat("es-AR", {
@@ -247,6 +253,11 @@ const updateRateHistory = (history: ExchangeRateRecord[], next: ExchangeRateReco
   { ...next, date: next.date.slice(0, 10) },
 ].sort((left, right) => right.date.localeCompare(left.date));
 const usdPlain = (value: number) => new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
+// Fecha corta: "23/10" (o "23/10/25" si no es de este año).
+const dayMonth = (value: string) => {
+  const [year, month, day] = value.slice(0, 10).split("-");
+  return `${Number(day)}/${Number(month)}${year === String(new Date().getFullYear()) ? "" : `/${year.slice(2)}`}`;
+};
 const percent = (value: number) => `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value)}%`;
 const contributionInUsd = (contribution: InvestorContribution) => toUsd(contribution.amount, contribution.currency ?? "USD", contribution.rate ?? 1500);
 const investorMetrics = (investor: Investor, projectedSaleDate: string) => {
@@ -355,14 +366,15 @@ function NavIcon({ name }: { name: IconName }) {
 }
 
 const nav: Array<{ id: View; label: string; icon: IconName }> = [
-  { id: "home", label: "Resumen", icon: "home" },
+  { id: "home", label: "Inicio", icon: "home" },
   { id: "budgets", label: "Presupuesto", icon: "budgets" },
   { id: "payments", label: "Pagos", icon: "expenses" },
   { id: "investors", label: "Inversores", icon: "investors" },
 ];
 
 // Colores de categoría validados para daltonismo (ver skill dataviz); "Otros" va siempre en gris.
-const categoryColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+// Tonos suaves (saturación OKLCH ~0.11); el orden está validado para daltonismo entre vecinos.
+const categoryColors = ["#2f6ca6", "#ca748f", "#d2ab57", "#009589", "#68549c", "#d58a55", "#9a463a", "#609754"];
 // Tipos (mano de obra / materiales / adicionales): tonos del color de la app, para no confundirse con las categorías.
 const typeColors: Record<string, string> = { "sub-mano-obra": "#10556c", "sub-materiales": "#3a8fae", "sub-adicionales": "#8cc3d6" };
 const otherColor = "#6b6a66";
@@ -373,7 +385,7 @@ type ChartCenter = { label: string; value: string; note?: string; tone?: "danger
 
 // Anillo con segmentos (montos en pesos). Al pasar el mouse o tocar un segmento o una fila
 // de la leyenda, se resalta y el centro muestra su monto.
-function RingChart({ slices, scale, center, legendExtra, ariaLabel }: { slices: ChartSlice[]; scale: number; center: ChartCenter; legendExtra?: ReactNode; ariaLabel: string }) {
+function RingChart({ slices, scale, center, legendExtra, ariaLabel, stacked = false }: { slices: ChartSlice[]; scale: number; center: ChartCenter; legendExtra?: ReactNode; ariaLabel: string; stacked?: boolean }) {
   const [hovered, setHovered] = useState("");
   const radius = 80;
   const circumference = 2 * Math.PI * radius;
@@ -386,7 +398,7 @@ function RingChart({ slices, scale, center, legendExtra, ariaLabel }: { slices: 
     offset: lengths.slice(0, index).reduce((sum, value) => sum + value, 0),
   }));
   const active = slices.find((slice) => slice.key === hovered);
-  return <div className="ring-chart">
+  return <div className={`ring-chart ${stacked ? "stacked" : ""}`}>
     <div className="ring-figure" onMouseLeave={() => setHovered("")}>
       <svg viewBox="0 0 200 200" role="img" aria-label={ariaLabel}>
         <circle cx="100" cy="100" r={radius} fill="none" stroke={trackColor} strokeWidth="26" />
@@ -455,6 +467,8 @@ export function ControlObraApp() {
   const [modal, setModal] = useState<ModalName>(null);
   const [selectedLineId, setSelectedLineId] = useState<string>("");
   const [expandedLineId, setExpandedLineId] = useState<string>("");
+  const [expandedPaymentId, setExpandedPaymentId] = useState<string>("");
+  const [paymentCategoryFilter, setPaymentCategoryFilter] = useState<string>("");
   const [selectedBudgetId, setSelectedBudgetId] = useState<string>("");
   const [selectedBudgetItemId, setSelectedBudgetItemId] = useState<string>("");
   const [budgetCategoryId, setBudgetCategoryId] = useState<string>("");
@@ -524,6 +538,7 @@ export function ControlObraApp() {
     setExpandedLineId("");
     setExpandedInvestorId("");
     setBudgetCategoryId("");
+    setPaymentCategoryFilter("");
   }, [view]);
 
   const categories = data.categories.filter((item) => !item.archived);
@@ -654,113 +669,164 @@ export function ControlObraApp() {
     setModal("payment");
   };
 
-  const renderHome = () => {
+  // Barra de la inversión (en Inversores): la venta proyectada partida en propiedad, remodelación y ganancia.
+  const renderInvestmentStrip = () => {
     const plan = data.investmentPlan;
-    const paymentSlices: ChartSlice[] = [
-      { key: "paid", label: "Pagado", value: totals.paidArs, color: "#2b7a55" },
-      { key: "pending", label: "Falta pagar", value: totals.remainingArs, color: trackColor },
-    ];
     const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent);
-    const editPlan = (field: "property" | "sale") => { setInvestmentField(field); setModal("investmentPlan"); };
-    // Ganancia = venta proyectada − (propiedad con comisiones + remodelación proyectada).
-    const profitUsd = plan.projectedSalePriceUsd - propertyTotalUsd - plan.remodelBudgetUsd;
+    const editPlan = (field: PlanField) => { setInvestmentField(field); setModal("investmentPlan"); };
+    // Ganancia del proyecto = venta proyectada − (propiedad con comisiones + remodelación proyectada).
+    const investedUsd = propertyTotalUsd + plan.remodelBudgetUsd;
+    const profitUsd = plan.projectedSalePriceUsd - investedUsd;
+    const stripScale = Math.max(plan.projectedSalePriceUsd, investedUsd);
+    const stripSegments = [
+      { key: "property", label: "Propiedad", value: propertyTotalUsd, color: "#10556c", field: "property" as PlanField },
+      { key: "remodel", label: "Remodelación", value: plan.remodelBudgetUsd, color: "#8cc3d6", field: "remodel" as PlanField },
+      { key: "profit", label: "Ganancia", value: Math.max(0, profitUsd), color: "#2b7a55", field: null },
+    ];
+    return <section className="panel investment-strip">
+        <div className="strip-head">
+          <div><h2>La inversión</h2></div>
+          <div className={`strip-profit ${profitUsd < 0 ? "negative" : ""}`}>
+            <span>{profitUsd < 0 ? "Pérdida del proyecto" : "Ganancia del proyecto"}</span>
+            <strong>{plan.projectedSalePriceUsd > 0 ? money(Math.abs(profitUsd), "USD") : "—"}</strong>
+            {plan.projectedSalePriceUsd > 0 && investedUsd > 0 && <small>{Math.round((profitUsd / investedUsd) * 100)}% sobre lo invertido</small>}
+          </div>
+        </div>
+        {stripScale > 0 && <div className="strip-bar" role="img" aria-label={`Propiedad ${money(propertyTotalUsd, "USD")}, remodelación ${money(plan.remodelBudgetUsd, "USD")}, venta proyectada ${money(plan.projectedSalePriceUsd, "USD")}`}>
+          {stripSegments.filter((segment) => segment.value > 0.5).map((segment) => <button type="button" key={segment.key} style={{ width: `${(segment.value / stripScale) * 100}%`, background: segment.color }}
+            title={`${segment.label}: ${money(segment.value, "USD")}`} onClick={() => editPlan(segment.field ?? "sale")} />)}
+          {profitUsd < 0 && plan.projectedSalePriceUsd > 0 && <span className="strip-sale-mark" style={{ left: `${(plan.projectedSalePriceUsd / stripScale) * 100}%` }} title="Venta proyectada" />}
+        </div>}
+        <div className="strip-legend">
+          {stripSegments.slice(0, 2).map((segment) => <button type="button" key={segment.key} onClick={() => editPlan(segment.field ?? "sale")}><i style={{ background: segment.color }} />{segment.label}<b>{money(segment.value, "USD")}</b></button>)}
+          {profitUsd > 0 && <span className="strip-legend-item"><i style={{ background: stripSegments[2].color }} />Ganancia</span>}
+          <button type="button" className="strip-sale" onClick={() => editPlan("sale")}>Venta proyectada<b>{money(plan.projectedSalePriceUsd, "USD")}</b></button>
+        </div>
+      </section>;
+  };
 
+  const renderHome = () => {
+    const pendingPercent = Math.max(0, 100 - totals.paidPercent);
     return <div className="page-content home-view">
-      <header className="simple-heading"><h1>Resumen</h1></header>
+      <header className="simple-heading"><h1>Inicio</h1></header>
 
       <section className="home-actions" aria-label="Acciones">
-        <button className="action-card" onClick={openPaymentModal}>
-          <span className="action-icon"><NavIcon name="check" /></span>
-          <b>Registrar pago</b>
-        </button>
         <button className="action-card" onClick={() => { setSelectedBudgetItemId(""); setModal("budgetItem"); }}>
           <span className="action-icon"><NavIcon name="budgets" /></span>
           <b>Agregar al presupuesto</b>
         </button>
+        <button className="action-card" onClick={openPaymentModal}>
+          <span className="action-icon"><NavIcon name="check" /></span>
+          <b>Registrar pago</b>
+        </button>
       </section>
 
-      <section className="funding-group"><span className="funding-group-label">En dólares</span><div className="investment-plan-grid">
-        <button type="button" className="plan-card" onClick={() => editPlan("property")}><span>Precio de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong></button>
-        <button type="button" className="plan-card" onClick={() => editPlan("sale")}><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong></button>
-        <div className={`plan-card static ${profitUsd < 0 ? "negative" : "positive"}`} title="Venta proyectada − (propiedad con comisiones + remodelación proyectada)"><span>Ganancia</span><strong>{plan.projectedSalePriceUsd > 0 ? money(profitUsd, "USD") : "—"}</strong></div>
-      </div></section>
-
-      <section className="home-charts">
-        <article className="panel chart-panel">
-          <div className="panel-head">
-            <div><h2>Presupuesto</h2><p>Por rubro</p></div>
-            <button className="text-button" onClick={() => setView("budgets")}>Ver presupuesto</button>
+      <section className="panel payment-progress">
+        <div className="panel-head">
+          <h2>Pagos</h2>
+          <button className="text-button" onClick={() => setView("payments")}>Ver pagos</button>
+        </div>
+        {budgetItems.length === 0 ? <div className="chart-empty">Todavía no cargaste el presupuesto.</div> : <>
+          <div className="progress-headline">
+            <div><span>Pagado</span><strong>{money(totals.paidArs, "ARS")}</strong></div>
+            <small>{Math.round(totals.paidPercent)}% del presupuesto · {money(paidUsdReal, "USD")} en dólares</small>
           </div>
-          {budgetItems.length === 0
-            ? <div className="chart-empty">Todavía no cargaste el presupuesto.</div>
-            : <RingChart
-              ariaLabel="Presupuesto por rubro"
-              slices={categorySlices(budgetItems.map((item) => [item.categoryId, budgetItemArs(item)]))}
-              scale={budgetTotalArs}
-              center={{ label: "Total", value: money(budgetTotalArs, "ARS") }}
-            />}
-        </article>
-
-        <article className="panel chart-panel">
-          <div className="panel-head">
-            <div><h2>Pagos</h2><p>Cuánto se pagó del presupuesto</p></div>
-            <button className="text-button" onClick={() => setView("payments")}>Ver pagos</button>
+          <div className="progress-meter" role="img" aria-label={`Pagado ${Math.round(totals.paidPercent)}% del presupuesto`}>
+            {totals.paidPercent > 0.1 && <span className="paid" style={{ width: `${totals.paidPercent}%` }} title={`Pagado: ${money(totals.paidArs, "ARS")}`} />}
+            {pendingPercent > 0.1 && <span className="pending" style={{ width: `${pendingPercent}%` }} title={`Falta pagar: ${money(totals.remainingArs, "ARS")}`} />}
           </div>
-          {budgetItems.length === 0
-            ? <div className="chart-empty">Todavía no cargaste el presupuesto.</div>
-            : <RingChart
-              ariaLabel="Pagado y pendiente del presupuesto"
-              slices={paymentSlices}
-              scale={totals.committedArs}
-              center={{ label: "Pagado", value: `${Math.round(totals.paidPercent)}%`, note: "del presupuesto" }}
-              legendExtra={<li className="legend-total"><span>Pagado en dólares</span><b>{money(paidUsdReal, "USD")}</b></li>}
-            />}
-        </article>
+          <div className="progress-foot"><span>Falta pagar <b>{money(totals.remainingArs, "ARS")}</b></span><span>Total <b>{money(totals.committedArs, "ARS")}</b></span></div>
+        </>}
+      </section>
+
+      <section className="panel chart-panel home-budget">
+        <div className="panel-head">
+          <div><h2>Presupuesto por rubro</h2></div>
+          <button className="text-button" onClick={() => setView("budgets")}>Ver presupuesto</button>
+        </div>
+        {budgetItems.length === 0
+          ? <div className="chart-empty">Todavía no cargaste el presupuesto.</div>
+          : <RingChart
+            ariaLabel="Presupuesto por rubro"
+            stacked
+            slices={categorySlices(budgetItems.map((item) => [item.categoryId, budgetItemArs(item)]))}
+            scale={budgetTotalArs}
+            center={{ label: "Total", value: money(budgetTotalArs, "ARS") }}
+          />}
       </section>
     </div>;
   };
 
   const renderPayments = () => {
     const lineFor = (payment: Payment) => budgetItems.find((item) => item.id === payment.expenseId);
+    const paymentArs = (payment: Payment) => toArs(payment.amount, payment.currency, payment.rate);
+    // Avance de pagos por rubro, a partir de las líneas del presupuesto.
+    const byCategory = new Map<string, { total: number; paid: number }>();
+    budgetItems.forEach((item) => {
+      const current = byCategory.get(item.categoryId) ?? { total: 0, paid: 0 };
+      byCategory.set(item.categoryId, { total: current.total + budgetItemArs(item), paid: current.paid + paidArsFor(item) });
+    });
+    const areas = [...byCategory.entries()].sort((a, b) => b[1].total - a[1].total);
+    const visiblePayments = data.payments
+      .filter((payment) => !paymentCategoryFilter || lineFor(payment)?.categoryId === paymentCategoryFilter)
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const listTotal = visiblePayments.reduce((sum, payment) => sum + paymentArs(payment), 0);
+    const selectArea = (id: string) => {
+      setPaymentCategoryFilter((current) => current === id ? "" : id);
+      setExpandedPaymentId("");
+      document.getElementById("pagos-realizados")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
     return <div className="page-content">
       <SimpleHeading title="Pagos" action="Registrar pago" onAction={openPaymentModal} />
-      {budgetItems.length > 0 && <section className="panel real-cost-panel">
-        <div className="real-cost-head">
-          <div>
-            <span>Costo real pagado en dólares</span>
-            <strong>{money(paidUsdReal, "USD")}</strong>
-            <small>{totals.remainingArs > 0.5 ? "Cada pago se pasa a dólares con la cotización del día en que se pagó." : "Todo el presupuesto está pagado: este es el costo final en dólares."}</small>
-          </div>
-        </div>
-        <div className="cost-meter" role="img" aria-label={`Pagado ${money(totals.paidArs, "ARS")}, falta pagar ${money(totals.remainingArs, "ARS")}`}>
-          {totals.paidArs > 0.5 && <span className="paid" style={{ width: `${totals.paidPercent}%` }} title={`Pagado: ${money(totals.paidArs, "ARS")} = ${money(paidUsdReal, "USD")}`} />}
-          {totals.remainingArs > 0.5 && <span className="pending" style={{ width: `${100 - totals.paidPercent}%` }} title={`Falta pagar: ${money(totals.remainingArs, "ARS")}`} />}
-        </div>
-        <div className="cost-meter-legend">
-          <span><i className="paid" />Pagado <b>{money(totals.paidArs, "ARS")}</b> → <b>{money(paidUsdReal, "USD")}</b></span>
-          <span><i className="pending" />Falta pagar <b>{money(totals.remainingArs, "ARS")}</b> <small>se pasa a dólares al pagarse</small></span>
-        </div>
+      {budgetItems.length > 0 && <section className="payment-summary">
+        <div><span>Pagado</span><strong className="paid">{money(totals.paidArs, "ARS")}</strong><small>{Math.round(totals.paidPercent)}% · equivale a {money(paidUsdReal, "USD")}</small></div>
+        <div><span>Falta pagar</span><strong className="pending">{money(totals.remainingArs, "ARS")}</strong></div>
+        <div><span>Total del presupuesto</span><strong>{money(totals.committedArs, "ARS")}</strong></div>
       </section>}
+
+      {areas.length > 0 && <section className="payment-areas-section">
+        <h2>Por rubro</h2>
+        <div className="payment-areas">{areas.map(([id, value]) => {
+          const paidPercent = value.total ? Math.round((value.paid / value.total) * 100) : 0;
+          return <button type="button" key={id} className={`payment-area ${paymentCategoryFilter === id ? "active" : ""}`} aria-pressed={paymentCategoryFilter === id} onClick={() => selectArea(id)}>
+            <span className="payment-area-head"><span><i style={{ background: categoryColor(id) }} />{categoryName(id)}</span><b>{paidPercent}%</b></span>
+            <span className="area-bar"><span style={{ width: `${paidPercent}%`, background: categoryColor(id) }} /></span>
+            <span className="payment-area-numbers"><span>Pagado <b>{money(value.paid, "ARS")}</b></span><span>Falta <b>{money(Math.max(0, value.total - value.paid), "ARS")}</b></span></span>
+          </button>;
+        })}</div>
+      </section>}
+
       {data.payments.length === 0
         ? <EmptyState title="Todavía no hay pagos" copy="Cuando pagues algo del presupuesto, registralo acá. Cada pago se pasa a dólares con la cotización de ese día." action="Registrar pago" onAction={openPaymentModal} />
-        : <section className="history-block">
-          <h2>Pagos realizados</h2>
-          <div className="payment-history standalone">
-            <div className="payment-history-row head"><span>Fecha</span><span>Qué se pagó</span><span className="num">Pagado</span><span className="num">Dólar del día</span><span className="num">En dólares</span><span /></div>
-            {data.payments.slice().sort((a, b) => b.date.localeCompare(a.date)).map((payment) => {
+        : <section className="history-block" id="pagos-realizados">
+          <div className="history-head">
+            <h2>Pagos realizados</h2>
+            {paymentCategoryFilter && <button className="filter-chip" onClick={() => setPaymentCategoryFilter("")}>{categoryName(paymentCategoryFilter)} ✕</button>}
+          </div>
+          {visiblePayments.length === 0 ? <div className="inline-empty">Todavía no hay pagos en este rubro.</div> : <div className="payment-list">
+            {visiblePayments.map((payment) => {
               const line = lineFor(payment);
               const note = [line?.description, payment.description].filter(Boolean).join(" · ");
-              return <div className="payment-history-row" key={payment.id}>
-                <span className="date">{shortDate(payment.date)}</span>
-                <span className="concept"><b>{line ? pathName(line.categoryId, line.subcategoryId) : "Línea eliminada"}</b>{note && <small>{note}</small>}</span>
-                <span className="num"><b>{money(payment.amount, payment.currency)}</b></span>
-                <span className="num muted rate">{payment.currency === "ARS" ? money(payment.rate, "ARS") : "—"}</span>
-                <span className="num">{money(toUsd(payment.amount, payment.currency, payment.rate), "USD")}</span>
-                <span className="num"><button className="link-danger" onClick={() => deletePayment(payment)}>Eliminar</button></span>
-              </div>;
+              const expanded = expandedPaymentId === payment.id;
+              return <article className={`payment-item ${expanded ? "expanded" : ""}`} key={payment.id}>
+                <button type="button" className="payment-item-row" aria-expanded={expanded} onClick={() => setExpandedPaymentId((current) => current === payment.id ? "" : payment.id)}>
+                  <span className="date">{dayMonth(payment.date)}</span>
+                  <span className="concept"><b>{line ? pathName(line.categoryId, line.subcategoryId) : "Línea eliminada"}</b>{note && <small>{note}</small>}</span>
+                  <strong>{money(payment.amount, payment.currency)}</strong>
+                </button>
+                {expanded && <div className="payment-item-detail">
+                  <dl>
+                    <div><dt>Fecha</dt><dd>{shortDate(payment.date)}</dd></div>
+                    {payment.currency === "ARS" && <div><dt>Dólar del día</dt><dd>{money(payment.rate, "ARS")}</dd></div>}
+                    <div><dt>{payment.currency === "ARS" ? "En dólares" : "En pesos"}</dt><dd>{payment.currency === "ARS" ? money(toUsd(payment.amount, payment.currency, payment.rate), "USD") : money(paymentArs(payment), "ARS")}</dd></div>
+                  </dl>
+                  <button className="danger-button compact" onClick={() => deletePayment(payment)}>Eliminar pago</button>
+                </div>}
+              </article>;
             })}
-            <div className="payment-history-row total"><span /><span>Total</span><span className="num"><b>{money(data.payments.reduce((sum, payment) => sum + toArs(payment.amount, payment.currency, payment.rate), 0), "ARS")}</b></span><span /><span className="num"><b>{money(paidUsdReal, "USD")}</b></span><span /></div>
-          </div>
+            <div className="payment-list-total"><span>Total pagado{paymentCategoryFilter ? ` en ${categoryName(paymentCategoryFilter)}` : ""}</span><strong>{money(listTotal, "ARS")}</strong></div>
+          </div>}
         </section>}
     </div>;
   };
@@ -831,7 +897,6 @@ export function ControlObraApp() {
         </div>
         <div className="budget-item-list">{group.items.slice().sort((a, b) => budgetItemArs(b) - budgetItemArs(a)).map(renderBudgetLine)}</div>
       </section>)}
-      <p className="list-hint">Tocá una línea para ver sus pagos, pagarla, editarla o eliminarla.</p>
     </>;
   };
 
@@ -852,25 +917,23 @@ export function ControlObraApp() {
       <SimpleHeading title="Presupuesto" action="Agregar al presupuesto" onAction={addItem} />
       {budgetItems.length === 0 ? <EmptyState title="Todavía no cargaste el presupuesto" copy="Anotá lo que pensás gastar en cada rubro (contratista, electricista…) y si es mano de obra, materiales o adicionales." action="Agregar al presupuesto" onAction={addItem} /> : <>
         <section className="budget-total">
-          <span>Presupuesto total de la obra</span>
           <strong>{money(budgetTotalArs, "ARS")}</strong>
           <small>Pagado hasta hoy: {money(totals.paidArs, "ARS")} ({Math.round(totals.paidPercent)}%) · falta pagar {money(totals.remainingArs, "ARS")}</small>
         </section>
         {budgetCategoryId ? renderBudgetCategory(budgetCategoryId) : <>
           <section className="home-charts">
             <article className="panel chart-panel">
-              <div className="panel-head"><div><h2>Por rubro</h2><p>Contratista, electricista, etc.</p></div></div>
+              <div className="panel-head"><div><h2>Por rubro</h2></div></div>
               <RingChart ariaLabel="Presupuesto por rubro" slices={categorySlices(budgetItems.map((item) => [item.categoryId, budgetItemArs(item)]))} scale={budgetTotalArs} center={{ label: "Total", value: money(budgetTotalArs, "ARS") }} />
             </article>
             <article className="panel chart-panel">
-              <div className="panel-head"><div><h2>Por tipo</h2><p>Mano de obra, materiales y adicionales</p></div></div>
+              <div className="panel-head"><div><h2>Por tipo</h2></div></div>
               <RingChart ariaLabel="Presupuesto por tipo" slices={typeSlices(budgetItems.map((item) => [item.subcategoryId, budgetItemArs(item)]))} scale={typedTotal} center={{ label: "Total", value: money(typedTotal, "ARS") }}
                 legendExtra={untypedTotal > 0.5 ? <li className="legend-note">{money(untypedTotal, "ARS")} todavía no tienen tipo: elegíselo desde el detalle del rubro.</li> : undefined} />
             </article>
           </section>
           <section className="budget-items">
             <h2>Detalle por rubro</h2>
-            <p className="list-hint">El tamaño de cada cuadro es lo presupuestado. Tocá uno para ver sus líneas y pagos.</p>
             <div className="treemap">{tiles.map(([id, value], index) => {
               const rect = rects[index];
               const color = categoryColor(id);
@@ -891,7 +954,7 @@ export function ControlObraApp() {
 
       {!budgetCategoryId && <section className="comparisons">
         <div className="section-head">
-          <div><h2>Comparar proveedores</h2><p>Cargá ofertas de distintos proveedores para lo mismo y elegí una: se suma sola al presupuesto.</p></div>
+          <div><h2>Comparar proveedores</h2></div>
           <button className="secondary-button" onClick={() => setModal("budget")}>＋ Nueva comparación</button>
         </div>
         {data.budgetGroups.length === 0 ? <div className="inline-empty">No hay comparaciones. Creá una, por ejemplo “sanitarios del baño”, y cargá las ofertas.</div> : (
@@ -940,22 +1003,19 @@ export function ControlObraApp() {
     const plan = data.investmentPlan;
     const investorProfit = data.investors.reduce((sum, investor) => sum + investor.profitUsd, 0);
     const ownMoney = plan.ownCapitalUsd;
-    const ownerProfit = plan.projectedSalePriceUsd - investorCapitalTotal - investorProfit - ownMoney;
-    const propertyTotalUsd = propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent);
+    // Tu ganancia = ganancia del proyecto (venta − propiedad con comisiones − remodelación) − lo que se les da a los inversores.
+    const projectProfit = plan.projectedSalePriceUsd - propertyCostWithCommission(plan.propertyValueUsd, plan.propertyCommissionPercent) - plan.remodelBudgetUsd;
+    const ownerProfit = projectProfit - investorProfit;
     const editPlan = (field: PlanField) => { setInvestmentField(field); setModal("investmentPlan"); };
     const addInvestor = () => { setSelectedInvestorId(""); setModal("investor"); };
     return <div className="page-content">
       <SimpleHeading title="Inversores" action="Nuevo inversor" onAction={addInvestor} />
 
-      <section className="funding-group"><span className="funding-group-label">La inversión (en dólares) · tocá para editar</span><div className="investment-plan-grid">
-        <button type="button" className="plan-card" onClick={() => editPlan("property")}><span>Valor de la propiedad</span><strong>{money(propertyTotalUsd, "USD")}</strong><small>{plan.propertyValueUsd > 0 ? `Incluye ${percent(plan.propertyCommissionPercent)} de comisiones` : "Falta cargar el valor"}</small></button>
-        <button type="button" className="plan-card" onClick={() => editPlan("remodel")}><span>Remodelación proyectada</span><strong>{money(plan.remodelBudgetUsd, "USD")}</strong><small>{plan.remodelBudgetUsd > 0 ? "Lo que estimás gastar en la obra" : "Falta cargar el estimado"}</small></button>
-        <button type="button" className="plan-card" onClick={() => editPlan("sale")}><span>Venta proyectada</span><strong>{money(plan.projectedSalePriceUsd, "USD")}</strong><small>{plan.projectedSaleDate ? `Fecha estimada: ${shortDate(plan.projectedSaleDate)}` : "Falta definir la fecha"}</small></button>
-      </div></section>
+      {renderInvestmentStrip()}
 
       <section className="funding-group"><span className="funding-group-label">Tu parte</span><div className="investment-plan-grid own-funding-summary">
-        <button type="button" className="plan-card" onClick={() => editPlan("own")}><span>Plata propia</span><strong>{money(ownMoney, "USD")}</strong><small>{ownMoney > 0 ? "Lo que pusiste vos · tocá para editar" : "Tocá para cargarla"}</small></button>
-        <div className={`plan-card static ${ownerProfit < 0 ? "negative" : "positive"}`}><span>Ganancia proyectada</span><strong>{plan.projectedSalePriceUsd > 0 ? money(ownerProfit, "USD") : "—"}</strong><small>{plan.projectedSalePriceUsd <= 0 ? "Falta el precio de venta" : ownMoney <= 0 ? "Falta cargar la plata propia para que sea real" : "Venta − lo que se devuelve a inversores − plata propia"}</small></div>
+        <button type="button" className="plan-card" onClick={() => editPlan("own")}><span>Plata propia</span><strong>{money(ownMoney, "USD")}</strong></button>
+        <div className={`plan-card static ${ownerProfit < 0 ? "negative" : "positive"}`} title="Ganancia del proyecto − ganancia de los inversores"><span>Tu ganancia</span><strong>{plan.projectedSalePriceUsd > 0 ? money(ownerProfit, "USD") : "—"}</strong></div>
       </div></section>
 
       <section className="funding-group"><span className="funding-group-label">Inversores{data.investors.length > 0 ? " · tocá uno para ver el detalle" : ""}</span>
@@ -1069,6 +1129,150 @@ export function ControlObraApp() {
     notify(`${isCategory ? "Categoría" : "Subcategoría"} eliminada`);
   };
 
+  // ---------- Asistente: describe y aplica lo que propone el chat ----------
+  const assistantTypeIds: Record<string, string> = { mano_de_obra: "sub-mano-obra", materiales: "sub-materiales", adicionales: "sub-adicionales" };
+  const normalizeName = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+  const findCategoryByName = (list: Category[], name?: string) => name ? list.find((item) => !item.archived && normalizeName(item.name) === normalizeName(name)) : undefined;
+  const actionDate = (value?: string) => value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : today();
+  const dateLabel = (value: string) => value === today() ? "hoy" : shortDate(value);
+  const lineLabel = (line: BudgetItem) => [pathName(line.categoryId, line.subcategoryId), line.description].filter(Boolean).join(" · ");
+  // Si el pago no dice monto, se paga todo lo que falta de esa línea.
+  const paymentFromAction = (action: AssistantAction, line: BudgetItem) => {
+    const hasAmount = Number(action.monto) > 0;
+    const currency: Currency = hasAmount ? action.moneda ?? line.currency : line.currency;
+    return { amount: hasAmount ? Number(action.monto) : remainingFor(line), currency, date: actionDate(action.fecha) };
+  };
+
+  const assistantContext = () => ({
+    hoy: today(),
+    dia_de_la_semana: new Intl.DateTimeFormat("es-AR", { weekday: "long" }).format(new Date()),
+    ayer: yesterday(),
+    dolar_hoy: rate,
+    rubros: categories.map((item) => item.name),
+    presupuesto: budgetItems.map((item) => ({
+      id: item.id,
+      // Nombre legible para mostrarle al usuario (nunca el id).
+      nombre: [categoryName(item.categoryId), subcategoryName(item.subcategoryId), item.description || `presupuesto de ${money(item.amount, item.currency)}`].filter(Boolean).join(" · "),
+      rubro: categoryName(item.categoryId),
+      tipo: subcategoryName(item.subcategoryId),
+      descripcion: item.description,
+      monto: item.amount,
+      moneda: item.currency,
+      falta: Math.round(remainingFor(item) * 100) / 100,
+      con_saldo: remainingFor(item) > 0.005,
+    })),
+    presupuesto_total_ars: Math.round(totals.committedArs),
+    pagado_total_ars: Math.round(totals.paidArs),
+    falta_pagar_total_ars: Math.round(totals.remainingArs),
+    pagado_total_en_dolares_al_dia_de_cada_pago: Math.round(paidUsdReal * 100) / 100,
+    propiedad_usd: data.investmentPlan.propertyValueUsd,
+    comisiones_pct: data.investmentPlan.propertyCommissionPercent,
+    fecha_compra: data.investmentPlan.purchaseDate,
+    venta_proyectada_usd: data.investmentPlan.projectedSalePriceUsd,
+    fecha_venta: data.investmentPlan.projectedSaleDate,
+    remodelacion_proyectada_usd: data.investmentPlan.remodelBudgetUsd,
+    plata_propia_usd: data.investmentPlan.ownCapitalUsd,
+    inversores: data.investors.map((item) => item.name),
+  });
+
+  const describeAction = (action: AssistantAction): ActionPreview => {
+    const amount = Number(action.monto);
+    switch (action.tipo) {
+      case "agregar_presupuesto": {
+        const typeId = action.tipo_gasto ? assistantTypeIds[action.tipo_gasto] : undefined;
+        const category = findCategoryByName(data.categories, action.rubro);
+        const currency: Currency = action.moneda === "USD" ? "USD" : "ARS";
+        return {
+          text: `Agregar al presupuesto: ${category?.name ?? action.rubro ?? "?"} · ${typeId ? subcategoryName(typeId) : "?"} — ${money(amount, currency)}${action.descripcion ? ` (${action.descripcion})` : ""}${!category && action.rubro ? " · rubro nuevo" : ""}`,
+          problem: !action.rubro ? "Falta el rubro." : !typeId ? "Falta si es mano de obra, materiales o adicionales." : !(amount > 0) ? "Falta el monto." : undefined,
+        };
+      }
+      case "registrar_pago": {
+        const line = budgetItems.find((item) => item.id === action.linea_id);
+        if (!line) return { text: "Registrar un pago", problem: "No encontré esa línea del presupuesto." };
+        const payment = paymentFromAction(action, line);
+        const remaining = remainingFor(line);
+        return {
+          text: `Registrar pago de ${money(payment.amount, payment.currency)} — ${lineLabel(line)} — ${dateLabel(payment.date)}${action.nota ? ` (${action.nota})` : ""}`,
+          problem: remaining <= 0.005 ? "Esa línea ya está pagada." : payment.currency === line.currency && payment.amount > remaining + 0.005 ? `Supera lo que falta (${money(remaining, line.currency)}).` : undefined,
+        };
+      }
+      case "actualizar_propiedad":
+        return {
+          text: `Propiedad: ${amount > 0 ? money(amount, "USD") : "mismo valor"}${Number.isFinite(action.comisiones_pct) ? ` · comisiones ${percent(Number(action.comisiones_pct))}` : ""}${action.fecha ? ` · comprada el ${shortDate(actionDate(action.fecha))}` : ""}`,
+          problem: !(amount > 0) && !Number.isFinite(action.comisiones_pct) && !action.fecha ? "No hay ningún dato para cambiar." : undefined,
+        };
+      case "actualizar_venta":
+        return {
+          text: `Venta proyectada: ${amount > 0 ? money(amount, "USD") : "mismo precio"}${action.fecha ? ` · fecha estimada ${shortDate(actionDate(action.fecha))}` : ""}`,
+          problem: !(amount > 0) && !action.fecha ? "No hay ningún dato para cambiar." : undefined,
+        };
+      case "actualizar_remodelacion":
+        return { text: `Remodelación proyectada: ${money(amount, "USD")}`, problem: amount > 0 ? undefined : "Falta el monto." };
+      case "actualizar_plata_propia":
+        return { text: `Plata propia: ${money(amount, "USD")}`, problem: amount > 0 ? undefined : "Falta el monto." };
+      case "agregar_inversor":
+        return {
+          text: `Nuevo inversor: ${action.nombre ?? "?"} — invirtió ${money(amount, action.moneda ?? "USD")}, ganancia ${money(Number(action.ganancia) || 0, action.moneda_ganancia ?? "USD")}${action.fecha ? ` · ${dateLabel(actionDate(action.fecha))}` : ""}`,
+          problem: !action.nombre?.trim() ? "Falta el nombre." : !(amount > 0) ? "Falta cuánto invirtió." : undefined,
+        };
+      default:
+        return { text: "Acción desconocida", problem: "Esto no lo puedo cargar." };
+    }
+  };
+
+  const applyAssistantActions = (actions: AssistantAction[]) => {
+    if (!actions.length) return;
+    setData((current) => {
+      const categoriesNext = [...current.categories];
+      const itemsNext = [...(current.budgetItems ?? [])];
+      const paymentsNext = [...current.payments];
+      const investorsNext = [...current.investors];
+      const plan = { ...current.investmentPlan };
+      actions.forEach((action) => {
+        const amount = Number(action.monto);
+        if (action.tipo === "agregar_presupuesto" && action.rubro && action.tipo_gasto && amount > 0) {
+          let category = findCategoryByName(categoriesNext, action.rubro);
+          if (!category) {
+            category = { id: uid("cat"), name: action.rubro.trim(), archived: false, subcategoryIds: [] };
+            categoriesNext.push(category);
+          }
+          itemsNext.push({ id: uid("bitem"), categoryId: category.id, subcategoryId: assistantTypeIds[action.tipo_gasto], description: action.descripcion?.trim() ?? "", amount, currency: action.moneda === "USD" ? "USD" : "ARS", rate });
+        }
+        if (action.tipo === "registrar_pago") {
+          const line = itemsNext.find((item) => item.id === action.linea_id);
+          if (line) {
+            const payment = paymentFromAction(action, line);
+            if (payment.amount > 0) paymentsNext.push({ id: uid("pay"), expenseId: line.id, date: payment.date, description: action.nota?.trim() ?? "", amount: payment.amount, currency: payment.currency, rate: rateForDate(payment.date) });
+          }
+        }
+        if (action.tipo === "actualizar_propiedad") {
+          if (amount > 0) plan.propertyValueUsd = amount;
+          if (Number.isFinite(action.comisiones_pct)) plan.propertyCommissionPercent = Math.max(0, Number(action.comisiones_pct));
+          if (action.fecha) plan.purchaseDate = actionDate(action.fecha);
+        }
+        if (action.tipo === "actualizar_venta") {
+          if (amount > 0) plan.projectedSalePriceUsd = amount;
+          if (action.fecha) plan.projectedSaleDate = actionDate(action.fecha);
+        }
+        if (action.tipo === "actualizar_remodelacion" && amount > 0) plan.remodelBudgetUsd = amount;
+        if (action.tipo === "actualizar_plata_propia" && amount > 0) { plan.ownCapitalUsd = amount; plan.ownCapitalManual = true; }
+        if (action.tipo === "agregar_inversor" && action.nombre?.trim() && amount > 0) {
+          const date = actionDate(action.fecha);
+          const profit = Number(action.ganancia) || 0;
+          const profitCurrency: Currency = action.moneda_ganancia ?? "USD";
+          investorsNext.push({
+            id: uid("investor"), name: action.nombre.trim(),
+            profitUsd: toUsd(profit, profitCurrency, rate), profitAmount: profit, profitCurrency, profitRate: rate,
+            contributions: [{ id: uid("contribution"), date, amount, currency: action.moneda ?? "USD", rate: rateForDate(date) }],
+          });
+        }
+      });
+      return { ...current, categories: categoriesNext, budgetItems: itemsNext, payments: paymentsNext, investors: investorsNext, investmentPlan: plan };
+    });
+    notify(actions.length === 1 ? "Listo, quedó cargado" : `Listo, se cargaron ${actions.length} cosas`);
+  };
+
   if (!loaded) return <div className="app-loading"><h1>Control de Obra</h1><p>Preparando tus datos…</p></div>;
 
   const activeNav = view === "categories" ? "budgets" : view;
@@ -1096,7 +1300,7 @@ export function ControlObraApp() {
 
       <nav className="bottom-nav">{nav.map((item) => <button key={item.id} className={activeNav === item.id ? "active" : ""} onClick={() => setView(item.id)}><NavIcon name={item.icon} /><small>{item.label}</small></button>)}</nav>
 
-      {modal === "budgetItem" && <BudgetItemModal data={data} rate={rate} item={budgetItems.find((item) => item.id === selectedBudgetItemId)} defaultCategoryId={budgetCategoryId} addNamedItem={addNamedItem}
+      {modal === "budgetItem" && <BudgetItemModal data={data} rate={rate} item={budgetItems.find((item) => item.id === selectedBudgetItemId)} defaultCategoryId={budgetCategoryId} categoryColor={categoryColor} addNamedItem={addNamedItem}
         remove={() => {
           const item = budgetItems.find((entry) => entry.id === selectedBudgetItemId);
           if (item && deleteBudgetItem(item)) { setModal(null); setSelectedBudgetItemId(""); }
@@ -1109,8 +1313,8 @@ export function ControlObraApp() {
           });
           setModal(null); setSelectedBudgetItemId(""); setView("budgets"); notify("Presupuesto guardado");
         }} />}
-      {modal === "payment" && <PaymentModal lines={budgetItems} rateFor={rateForDate} initialLineId={selectedLineId} remainingFor={remainingFor} pathName={pathName} close={() => { setModal(null); setSelectedLineId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedLineId(""); notify("Pago registrado"); }} />}
-      {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} addNamedItem={addNamedItem} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setView("budgets"); setModal("offer"); notify("Comparación creada"); }} />}
+      {modal === "payment" && <PaymentModal lines={budgetItems} rateFor={rateForDate} initialLineId={selectedLineId} remainingFor={remainingFor} categoryName={categoryName} subcategoryName={subcategoryName} categoryColor={categoryColor} close={() => { setModal(null); setSelectedLineId(""); }} save={(payment) => { setData((current) => ({ ...current, payments: [...current.payments, payment] })); setModal(null); setSelectedLineId(""); notify("Pago registrado"); }} />}
+      {modal === "budget" && <BudgetModal categories={categories} subcategories={subcategories} categoryColor={categoryColor} addNamedItem={addNamedItem} close={() => setModal(null)} save={(group) => { setData((current) => ({ ...current, budgetGroups: [...current.budgetGroups, group] })); setSelectedBudgetId(group.id); setView("budgets"); setModal("offer"); notify("Comparación creada"); }} />}
       {modal === "offer" && <OfferModal rate={rate} group={data.budgetGroups.find((item) => item.id === selectedBudgetId)} close={() => { setModal(null); setSelectedBudgetId(""); }} save={(offer) => { setData((current) => ({ ...current, budgetGroups: current.budgetGroups.map((group) => group.id === selectedBudgetId ? { ...group, offers: [...group.offers, offer] } : group) })); setModal(null); setSelectedBudgetId(""); notify("Oferta agregada"); }} />}
       {modal === "rate" && <RateModal rate={rate} date={rateDate} source={rateSource} history={data.exchangeRateHistory ?? []} close={() => setModal(null)} save={(nextRate, nextDate) => { const nextSource = "Cotización ajustada manualmente"; setRate(nextRate); setRateDate(nextDate); setRateSource(nextSource); setData((current) => ({ ...current, exchangeRateHistory: updateRateHistory(current.exchangeRateHistory ?? [], { date: nextDate, rate: nextRate, source: nextSource }) })); setModal(null); notify("Cotización actualizada"); }} />}
       {modal === "investmentPlan" && <InvestmentPlanModal field={investmentField} plan={data.investmentPlan} close={() => setModal(null)} save={(investmentPlan) => { setData((current) => ({ ...current, investmentPlan })); setModal(null); notify("Datos de inversión guardados"); }} />}
@@ -1122,6 +1326,7 @@ export function ControlObraApp() {
         setData((current) => ({ ...current, investors: current.investors.map((investor) => investor.id === selectedInvestorId ? { ...investor, contributions: investor.contributions.some((item) => item.id === contribution.id) ? investor.contributions.map((item) => item.id === contribution.id ? contribution : item) : [...investor.contributions, contribution] } : investor) }));
         setModal(null); setSelectedInvestorId(""); setSelectedContributionId(""); notify("Aporte guardado");
       }} />}
+      <AssistantChat getContext={assistantContext} describe={describeAction} apply={applyAssistantActions} />
       {toast && <div className="toast">✓ {toast}</div>}
     </main>
   );
@@ -1141,10 +1346,6 @@ function EmptyState({ icon, title, copy, action, onAction }: { icon?: string; ti
 
 function KindBadge({ kind }: { kind: ExpenseKind }) {
   return <span className={`kind-badge ${kind}`}>{kind === "approved" ? "Presupuesto aprobado" : kind === "additional" ? "Costo adicional" : "Costo"}</span>;
-}
-
-function CategorySelect({ label, value, setValue, items, onNew, className }: { label: string; value: string; setValue: (value: string) => void; items: Category[]; onNew: () => string; className?: string }) {
-  return <label className={className}><span>{label}</span><select required value={value} onChange={(event) => { if (event.target.value === "__new") { const id = onNew(); if (id) setValue(id); } else setValue(event.target.value); }}><option value="">Elegir…</option>{items.filter((item) => !item.archived).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}<option value="__new">＋ Crear nueva</option></select></label>;
 }
 
 function SubcategorySelect({ categoryId, value, setValue, categories, subcategories, onNew }: { categoryId: string; value: string; setValue: (value: string) => void; categories: Category[]; subcategories: Subcategory[]; onNew: () => string }) {
@@ -1167,6 +1368,14 @@ function SubcategoryOptions({ options, value, setValue, error = false }: { optio
   </div>{error && <small className="field-error">Elegí si es mano de obra, materiales o adicionales.</small>}</div>;
 }
 
+// Rubro con botones de colores (igual que al registrar un pago).
+function RubroPicker({ categories, value, setValue, colorFor, onNew, error = false }: { categories: Category[]; value: string; setValue: (value: string) => void; colorFor: (id: string) => string; onNew: () => string; error?: boolean }) {
+  return <div className="field span-2"><span>Rubro</span><div className={`pick-grid rubros ${error ? "invalid" : ""}`} role="radiogroup" aria-label="Rubro">
+    {categories.filter((item) => !item.archived).map((item) => <button type="button" role="radio" aria-checked={value === item.id} key={item.id} className={`pick-option ${value === item.id ? "active" : ""}`} onClick={() => setValue(item.id)}><i style={{ background: colorFor(item.id) }} />{item.name}</button>)}
+    <button type="button" className="pick-option add" onClick={() => { const id = onNew(); if (id) setValue(id); }}>＋ Nuevo rubro</button>
+  </div>{error && <small className="field-error">Elegí un rubro.</small>}</div>;
+}
+
 function AmountField({ label, currency, setCurrency, amount, setAmount, invalid = false, className = "span-2" }: { label: string; currency: Currency; setCurrency: (value: Currency) => void; amount: string; setAmount: (value: string) => void; invalid?: boolean; className?: string }) {
   return <div className={`amount-field ${className}`}><span>{label}</span><div className="amount-control"><CurrencyFields currency={currency} setCurrency={setCurrency} /><label className="amount-input"><span>{currency === "USD" ? "US$" : "$"}</span><FormattedAmountInput ariaLabel={`${label} en ${currency}`} required invalid={invalid} value={amount} setValue={setAmount} placeholder="0" /></label></div></div>;
 }
@@ -1181,7 +1390,7 @@ function MoreOptions({ open, setOpen, summary, children }: { open: boolean; setO
   return <button type="button" className="more-options span-2" onClick={() => setOpen(true)}><span>＋ Más opciones</span><small>{summary}</small></button>;
 }
 
-function BudgetItemModal({ data, rate, item, defaultCategoryId, addNamedItem, remove, close, save }: { data: AppState; rate: number; item?: BudgetItem; defaultCategoryId?: string; addNamedItem: (kind: "category" | "subcategory") => string; remove: () => void; close: () => void; save: (item: BudgetItem) => void }) {
+function BudgetItemModal({ data, rate, item, defaultCategoryId, categoryColor, addNamedItem, remove, close, save }: { data: AppState; rate: number; item?: BudgetItem; defaultCategoryId?: string; categoryColor: (id: string) => string; addNamedItem: (kind: "category" | "subcategory") => string; remove: () => void; close: () => void; save: (item: BudgetItem) => void }) {
   const options = typeOptions(data.subcategories);
   const [amount, setAmount] = useState(item?.amount?.toString() ?? "");
   const [currency, setCurrency] = useState<Currency>(item?.currency ?? "ARS");
@@ -1189,16 +1398,18 @@ function BudgetItemModal({ data, rate, item, defaultCategoryId, addNamedItem, re
   const [subcategoryId, setSubcategoryId] = useState(options.some((option) => option.id === item?.subcategoryId) ? item?.subcategoryId ?? "" : "");
   const [description, setDescription] = useState(item?.description ?? "");
   const [typeMissing, setTypeMissing] = useState(false);
+  const [categoryMissing, setCategoryMissing] = useState(false);
   const selectedRate = item?.rate ?? rate;
   return <Modal title={item ? "Editar presupuesto" : "Agregar al presupuesto"} close={close}><form className="form-grid" onSubmit={(event) => {
     event.preventDefault();
-    if (!subcategoryId) { setTypeMissing(true); return; }
-    if (Number(amount) <= 0) return;
+    if (!categoryId) setCategoryMissing(true);
+    if (!subcategoryId) setTypeMissing(true);
+    if (!categoryId || !subcategoryId || Number(amount) <= 0) return;
     save({ id: item?.id ?? uid("bitem"), categoryId, subcategoryId, description: description.trim(), amount: Number(amount), currency, rate: selectedRate, comparisonId: item?.comparisonId });
   }}>
     <AmountField label="Monto que pensás gastar" currency={currency} setCurrency={setCurrency} amount={amount} setAmount={setAmount} />
     {currency === "USD" && <ConversionHint amount={amount} currency={currency} rate={selectedRate} />}
-    <CategorySelect className="span-2" label="Rubro" value={categoryId} setValue={setCategoryId} items={data.categories} onNew={() => addNamedItem("category")} />
+    <RubroPicker categories={data.categories} value={categoryId} setValue={(value) => { setCategoryId(value); setCategoryMissing(false); }} colorFor={categoryColor} onNew={() => addNamedItem("category")} error={categoryMissing} />
     <SubcategoryOptions options={options} value={subcategoryId} setValue={(value) => { setSubcategoryId(value); setTypeMissing(false); }} error={typeMissing} />
     <label className="span-2"><span>Descripción (opcional)</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ej: revoque y pintura del living" /></label>
     <FormActions close={close} label={item ? "Guardar cambios" : "Agregar"} deleteLabel={item ? "Eliminar" : undefined} onDelete={remove} />
@@ -1264,12 +1475,40 @@ function InlinePaymentForm({ expense, rateFor, remaining, payments, removePaymen
   </div>;
 }
 
-function PaymentModal({ lines, rateFor, initialLineId, remainingFor, pathName, close, save }: { lines: BudgetItem[]; rateFor: (date: string) => number; initialLineId: string; remainingFor: (line: Payable) => number; pathName: (categoryId: string, subcategoryId: string) => string; close: () => void; save: (payment: Payment) => void }) {
-  const [lineId, setLineId] = useState(initialLineId);
-  const line = lines.find((item) => item.id === lineId);
+// Registrar un pago en pasos: rubro → qué se pagó (agrupado por tipo) → cuánto.
+function PaymentModal({ lines, rateFor, initialLineId, remainingFor, categoryName, subcategoryName, categoryColor, close, save }: { lines: BudgetItem[]; rateFor: (date: string) => number; initialLineId: string; remainingFor: (line: Payable) => number; categoryName: (id: string) => string; subcategoryName: (id: string) => string; categoryColor: (id: string) => string; close: () => void; save: (payment: Payment) => void }) {
+  const pending = lines.filter((item) => remainingFor(item) > 0.005);
+  const initialLine = pending.find((item) => item.id === initialLineId);
+  const [categoryId, setCategoryId] = useState(initialLine?.categoryId ?? "");
+  const [lineId, setLineId] = useState(initialLine?.id ?? "");
+  const line = pending.find((item) => item.id === lineId);
+  const categoryIds = [...new Set(pending.map((item) => item.categoryId))].sort((a, b) => categoryName(a).localeCompare(categoryName(b), "es"));
+  const inCategory = pending.filter((item) => item.categoryId === categoryId);
+  const typeOrder = (id: string) => { const index = ["sub-mano-obra", "sub-materiales", "sub-adicionales"].indexOf(id); return index < 0 ? 99 : index; };
+  const typeIds = [...new Set(inCategory.map((item) => item.subcategoryId))].sort((a, b) => typeOrder(a) - typeOrder(b));
+  const lineLabel = (item: BudgetItem) => item.description || subcategoryName(item.subcategoryId) || "Sin descripción";
+
   return <Modal title="Registrar pago" close={close}><div className="form-grid">
-    <label className="span-2"><span>¿Qué pagaste?</span><select required value={lineId} onChange={(event) => setLineId(event.target.value)}><option value="">Elegir del presupuesto…</option>{lines.filter((item) => remainingFor(item) > 0.005).map((item) => <option value={item.id} key={item.id}>{[pathName(item.categoryId, item.subcategoryId), item.description].filter(Boolean).join(" · ")} · falta {money(remainingFor(item), item.currency)}</option>)}</select></label>
-    {line && <div className="span-2"><InlinePaymentForm key={line.id} expense={line} rateFor={rateFor} remaining={remainingFor(line)} payments={[]} removePayment={() => undefined} save={save} /></div>}
+    {!categoryId && <div className="field span-2"><span>¿De qué rubro es el pago?</span><div className="pick-grid">
+      {categoryIds.map((id) => <button type="button" key={id} className="pick-option" onClick={() => setCategoryId(id)}><i style={{ background: categoryColor(id) }} />{categoryName(id)}</button>)}
+    </div></div>}
+
+    {categoryId && !line && <div className="field span-2">
+      <button type="button" className="text-button pick-back" onClick={() => setCategoryId("")}>← {categoryName(categoryId)} · cambiar rubro</button>
+      <span>¿Qué pagaste?</span>
+      {typeIds.map((typeId) => <div className="pick-group" key={typeId || "none"}>
+        <small>{subcategoryName(typeId) || "Sin tipo"}</small>
+        {inCategory.filter((item) => item.subcategoryId === typeId).map((item) => <button type="button" key={item.id} className="pick-option line" onClick={() => setLineId(item.id)}>{lineLabel(item)}</button>)}
+      </div>)}
+    </div>}
+
+    {line && <>
+      <div className="pick-selected span-2">
+        <span><i style={{ background: categoryColor(line.categoryId) }} /><b>{categoryName(line.categoryId)}</b> · {subcategoryName(line.subcategoryId)}{line.description ? ` · ${line.description}` : ""}</span>
+        <button type="button" className="text-button" onClick={() => setLineId("")}>Cambiar</button>
+      </div>
+      <div className="span-2"><InlinePaymentForm key={line.id} expense={line} rateFor={rateFor} remaining={remainingFor(line)} payments={[]} removePayment={() => undefined} save={save} /></div>
+    </>}
   </div></Modal>;
 }
 
@@ -1283,12 +1522,13 @@ function ProgressModal({ categories, subcategories, addSubcategoryForCategory, c
   </form></Modal>;
 }
 
-function BudgetModal({ categories, subcategories, addNamedItem, close, save }: { categories: Category[]; subcategories: Subcategory[]; addNamedItem: (kind: "category" | "subcategory") => string; close: () => void; save: (group: BudgetGroup) => void }) {
+function BudgetModal({ categories, subcategories, categoryColor, addNamedItem, close, save }: { categories: Category[]; subcategories: Subcategory[]; categoryColor: (id: string) => string; addNamedItem: (kind: "category" | "subcategory") => string; close: () => void; save: (group: BudgetGroup) => void }) {
   const [name, setName] = useState(""); const [categoryId, setCategoryId] = useState(""); const [subcategoryId, setSubcategoryId] = useState("");
   const [typeMissing, setTypeMissing] = useState(false);
-  return <Modal title="Nueva comparación" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (!subcategoryId) { setTypeMissing(true); return; } save({ id: uid("budget"), name: name.trim(), categoryId, subcategoryId, offers: [] }); }}>
+  const [categoryMissing, setCategoryMissing] = useState(false);
+  return <Modal title="Nueva comparación" close={close}><form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (!categoryId) setCategoryMissing(true); if (!subcategoryId) setTypeMissing(true); if (!categoryId || !subcategoryId) return; save({ id: uid("budget"), name: name.trim(), categoryId, subcategoryId, offers: [] }); }}>
     <label className="span-2"><span>¿Qué querés comparar?</span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej: sanitarios para el baño" /></label>
-    <CategorySelect className="span-2" label="Rubro" value={categoryId} setValue={setCategoryId} items={categories} onNew={() => addNamedItem("category")} />
+    <RubroPicker categories={categories} value={categoryId} setValue={(value) => { setCategoryId(value); setCategoryMissing(false); }} colorFor={categoryColor} onNew={() => addNamedItem("category")} error={categoryMissing} />
     <SubcategoryOptions options={typeOptions(subcategories)} value={subcategoryId} setValue={(value) => { setSubcategoryId(value); setTypeMissing(false); }} error={typeMissing} />
     <FormActions close={close} label="Crear y agregar oferta" />
   </form></Modal>;
